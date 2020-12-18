@@ -1,0 +1,364 @@
+<controls:MetroWindow  
+    x:Class="Playground.WpfApp.Forms.DataGridsEx.AccountMgr.AccountMgrView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:wpfUtilities="clr-namespace:Playground.WpfApp.WpfUtilities"
+    xmlns:viewModels="clr-namespace:Playground.WpfApp.Forms.DataGridsEx.AccountMgr"
+    xmlns:controls="http://metro.mahapps.com/winfx/xaml/controls"
+    xmlns:metroDialog="clr-namespace:MahApps.Metro.Controls.Dialogs;assembly=MahApps.Metro"
+    metroDialog:DialogParticipation.Register="{Binding}"
+    TitleCharacterCasing="Normal"
+    mc:Ignorable="d"
+    Title="{Binding Title}" Height="600" Width="1100">
+
+    <Window.Resources>
+        <ResourceDictionary>
+
+            <wpfUtilities:BindingProxy x:Key="MyBindingProxy" Data="{Binding}" />
+
+            <!-- the context menu for the tree -->
+            <Style TargetType="{x:Type ContextMenu}">
+                <Setter Property="SnapsToDevicePixels"
+          Value="True" />
+                <Setter Property="OverridesDefaultStyle"
+          Value="True" />
+                <Setter Property="Grid.IsSharedSizeScope"
+          Value="true" />
+                <Setter Property="HasDropShadow"
+          Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ContextMenu}">
+                            <Border x:Name="Border" Background="LightGray" BorderThickness="1">
+                                <Border.BorderBrush>
+                                    <SolidColorBrush Color="#FF888888" />
+                                </Border.BorderBrush>
+                                <StackPanel IsItemsHost="True"
+                      KeyboardNavigation.DirectionalNavigation="Cycle" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="HasDropShadow" Value="true">
+                                    <Setter TargetName="Border" Property="Padding" Value="0,3,0,3" />
+                                    <Setter TargetName="Border" Property="CornerRadius" Value="4" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+                <Setter Property="controls:ButtonHelper.PreserveTextCase" Value="True" />
+            </Style>
+
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <DockPanel>
+
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Close" Command="{Binding CloseCommand}" />
+                <MenuItem Header="_Reload TreeView" Command="{Binding ReloadTreeViewCommand}" />
+            </MenuItem>
+        </Menu>
+
+        <Grid Background="Wheat">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="3*" />
+            </Grid.ColumnDefinitions>
+
+            <ContentControl x:Name="SelectedItemHelper" Content="{Binding SelectedObject, Mode=OneWayToSource}" Visibility="Collapsed" />
+
+            <DockPanel Margin="2" Grid.Row="0" Grid.Column="0">
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Top" DockPanel.Dock="Top">
+                    <TextBox Text="{Binding AccountCategorySearchText}" Width="80" Margin="10,3,3,3" />
+                    <Button Content="Search Categories" Command="{Binding SearchAccountCategoryCommand}"  Margin="3" />
+                    <Button Content="Clear" Command="{Binding ClearSearchCommand}"  Margin="3" />
+                </StackPanel>
+
+                <TreeView Margin="2"
+                          Name="MyTreeView"
+                          wpfUtilities:TreeViewExtension.SelectItemOnRightClick="True"
+                          ItemsSource="{Binding CategoryNodes}"
+                          Background="AliceBlue"
+                          SelectedItemChanged="TreeView_SelectedItemChanged">
+                    <TreeView.ItemContainerStyle>
+
+                        <!-- This Style binds a TreeViewItem to a TreeViewItemViewModel.-->
+
+                        <Style TargetType="{x:Type TreeViewItem}">
+                            <!-- We have to select the item which is right-clicked on -->
+                            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                            <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+                            <Setter Property="FontWeight" Value="Normal" />
+                        </Style>
+                    </TreeView.ItemContainerStyle>
+
+                    <TreeView.Resources>
+                        <!-- Open/Closed folder icons and Styles (This only applies to Category node!)-->
+                        <BitmapImage x:Key="Icon_FolderOpen"   UriSource="pack://application:,,,/Images/Open-Folder-icon.png" />
+                        <BitmapImage x:Key="Icon_FolderClosed" UriSource="pack://application:,,,/Images/Closed-Folder-icon.png" />
+                        <Style x:Key="IconImageStyleSmall" TargetType="Image">
+                            <Setter Property="MaxWidth" Value="16" />
+                            <Setter Property="MaxHeight" Value="16" />
+                            <Setter Property="Margin" Value="1" />
+                        </Style>
+                        <!---->
+
+                        <!--Category Node-->
+                        <HierarchicalDataTemplate DataType="{x:Type viewModels:CategoryNode}" ItemsSource="{Binding Children}">
+                            <StackPanel Orientation="Horizontal">
+                                <Image>
+                                    <Image.Style>
+                                        <Style BasedOn="{StaticResource IconImageStyleSmall}" TargetType="Image">
+                                            <Setter Property="Source" Value="{Binding Source={StaticResource Icon_FolderClosed}, Mode=OneTime}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsExpanded}" Value="True">
+                                                    <Setter Property="Source" Value="{Binding Source={StaticResource Icon_FolderOpen}, Mode=OneTime}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Image.Style>
+                                </Image>
+                                <TextBlock Text="{Binding CategoryName}" ToolTip="{Binding ToolTipText}">
+                                    <TextBlock.ContextMenu>
+                                        <ContextMenu>
+
+                                            <MenuItem Header="Display" CommandParameter="Display" />
+                                            <MenuItem Header="Edit" CommandParameter="Edit" />
+                                            <MenuItem Header="Add new Account" CommandParameter="ADD_NEW_ACCOUNT" />
+
+                                            <ContextMenu.ItemContainerStyle>
+                                                <Style TargetType="MenuItem">
+                                                    <Setter Property="Command" Value="{Binding DataContext.CategoryContextMenuCommand, Source={x:Reference MyTreeView}}" />
+                                                </Style>
+                                            </ContextMenu.ItemContainerStyle>
+                                        </ContextMenu>
+                                    </TextBlock.ContextMenu>
+                                </TextBlock>
+                            </StackPanel>
+                        </HierarchicalDataTemplate>
+
+                        <!--Account node can be of type DataTemplate as this node does not have children-->
+                        <DataTemplate DataType="{x:Type viewModels:AccountNode}">
+                            <StackPanel Orientation="Horizontal">
+                                <Image Source="/Images/File-icon.png" />
+                                <TextBlock Text="{Binding AccountName}" ToolTip="{Binding ToolTipText}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </TreeView.Resources>
+                </TreeView>
+            </DockPanel>
+
+            <GridSplitter Grid.Row="0" Grid.Column="1"
+                          Background="Black"
+                          Width="5"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch" />
+
+            <TabControl Grid.Row="0" Grid.Column="2" SelectedIndex="{Binding SelectedTabIndex, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}">
+                <TabItem Header="General">
+                    <Grid Background="Beige">
+                        <TextBlock Text="Select TreeView node to navigate to appropriate tab." />
+                    </Grid>
+                </TabItem>
+
+                <TabItem Header="Categories">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <DockPanel Grid.Row="0" Margin="2" LastChildFill="True">
+                            <StackPanel Orientation="Horizontal" Background="AliceBlue" Margin="2">
+                                <Button Margin="2" Name="BtnAddCategory" Command="{Binding AddNewCategoryCommand}" ToolTip="Insert a row for a new Category record.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="../../../Images/Add.png" Height="16" Width="16" Margin="2,0,0,0" />
+                                    </StackPanel>
+                                </Button>
+                                <Separator Margin="2" />
+                                <Button Margin="2" Name="BtnDeleteCategory" Command="{Binding DeleteCategoryCommand}" ToolTip="Delete a selected Category.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="../../../Images/Delete.png" Height="16" Width="16" Margin="2,0,0,0" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <DataGrid Grid.Row="1"
+                                  Name="DgvCategories"
+                                  Margin="2"
+                                  AlternationCount="2"
+                                  CanUserAddRows="False"
+                                  SelectionMode="Single"
+                                  AutoGenerateColumns="False"
+                                  GridLinesVisibility="All"
+                                  IsReadOnly="True"
+                                  VerticalScrollBarVisibility="Visible"
+                                  ItemsSource="{Binding CategoriesView}"
+                                  SelectedItem="{Binding SelectedCategory}">
+
+                            <DataGrid.Columns>
+
+                                <!--Edit column-->
+                                <DataGridTemplateColumn Header="Edit" Width="80">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Padding="4,2,4,3">
+                                                <Hyperlink Command="{Binding DataContext.EditCategoryCommand, RelativeSource={ RelativeSource FindAncestor, AncestorType ={x:Type DataGrid}}}">
+                                                    <TextBlock Text="Edit" ToolTip="Edit this Category" />
+                                                </Hyperlink>
+                                            </TextBlock>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+
+                                <!--<DataGridTextColumn Header=" Id " Width="100" IsReadOnly="True" Binding="{Binding CategoryId}" />-->
+
+                                <DataGridTextColumn Header=" Category Name "
+                                                    Width="*"
+                                                    EditingElementStyle="{StaticResource errorStyle}"
+                                                    Binding="{Binding CategoryName, UpdateSourceTrigger=PropertyChanged}">
+                                    <DataGridTextColumn.HeaderTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Vertical">
+                                                <TextBlock TextAlignment="Center" Text="{Binding Content, RelativeSource={RelativeSource Mode=TemplatedParent}}" />
+                                                <TextBox Style="{StaticResource FilterTextBoxStyles}" MinWidth="650" Tag="Filter..." Width="Auto" Text="{Binding DataContext.CategoryNameFilter, UpdateSourceTrigger=PropertyChanged, RelativeSource={RelativeSource AncestorType=DataGrid}}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </DataGridTextColumn.HeaderTemplate>
+                                </DataGridTextColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </TabItem>
+
+                <TabItem Header="Accounts">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="157*"/>
+                            <ColumnDefinition Width="23*"/>
+                            <ColumnDefinition Width="629*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <DockPanel Grid.Row="0" Margin="2" LastChildFill="True" Grid.ColumnSpan="3">
+                            <StackPanel Orientation="Horizontal" Background="AliceBlue" Margin="3">
+                                <Button Margin="2" Name="BtnAddAccount" Command="{Binding AddNewAccountCommand}" ToolTip="Insert a row for a new Account record.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="../../../Images/Add.png" Height="16" Width="16" Margin="2,0,0,0" />
+                                    </StackPanel>
+                                </Button>
+                                <Separator Margin="2" />
+                                <Button Margin="2" Name="BtnDeleteAccount" Command="{Binding DeleteAccountCommand}" ToolTip="Delete a selected Account.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="../../../Images/Delete.png" Height="16" Width="16" Margin="2,0,0,0" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <DataGrid Grid.Row="1"
+                                  Name="DgvAccounts"
+                                  Margin="2"
+                                  AlternationCount="2"
+                                  CanUserAddRows="False"
+                                  SelectionMode="Single"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  ItemsSource="{Binding AccountsView}"
+                                  SelectedItem="{Binding SelectedAccount}" Grid.ColumnSpan="3">
+                            <DataGrid.Columns>
+                                <!--<DataGridTextColumn Header="Id" Visibility="Hidden" Width="*" Binding="{Binding AccountId}" IsReadOnly="True" />-->
+
+                                <!--Edit column-->
+                                <DataGridTemplateColumn Header="Edit" Width="50">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Padding="4,2,4,3">
+                                                <Hyperlink Command="{Binding DataContext.EditAccountCommand, RelativeSource={ RelativeSource FindAncestor, AncestorType ={x:Type DataGrid}}}">
+                                                    <TextBlock Text="Edit" ToolTip="Edit this Account" />
+                                                </Hyperlink>
+                                            </TextBlock>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+
+                                <DataGridTextColumn Header=" Account Name "
+                                                    Width="180"
+                                                    EditingElementStyle="{StaticResource errorStyle}"
+                                                    Binding="{Binding AccountName, UpdateSourceTrigger=PropertyChanged}">
+                                    <DataGridTextColumn.HeaderTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Vertical">
+                                                <TextBlock TextAlignment="Center" Text="{Binding Content, RelativeSource={RelativeSource Mode=TemplatedParent}}" />
+                                                <TextBox Style="{StaticResource FilterTextBoxStyles}" MinWidth="150" Tag="Filter..." Width="Auto" Text="{Binding DataContext.AccountNameFilter, UpdateSourceTrigger=PropertyChanged, RelativeSource={RelativeSource AncestorType=DataGrid}}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </DataGridTextColumn.HeaderTemplate>
+                                </DataGridTextColumn>
+
+                                <DataGridTextColumn Header="Login Id"
+                                                    Width="Auto"
+                                                    EditingElementStyle="{StaticResource errorStyle}"
+                                                    Binding="{Binding AccountLoginId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <DataGridTextColumn Header="Password"
+                                                    Width="Auto"
+                                                    EditingElementStyle="{StaticResource errorStyle}"
+                                                    Binding="{Binding AccountPassword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+
+                                    <DataGridTextColumn.CellStyle>
+
+                                        <Style TargetType="DataGridCell">
+                                            <Setter Property="ContextMenu">
+                                                <Setter.Value>
+                                                    <ContextMenu>
+                                                        <MenuItem Header="View Detail" CommandParameter="ViewDetail" Command="{Binding Source={StaticResource MyBindingProxy}, Path=Data.AccountContextMenuCommand}" />
+                                                    </ContextMenu>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </DataGridTextColumn.CellStyle>
+                                </DataGridTextColumn>
+
+                                <DataGridTextColumn Header="Notes"
+                                                    Width="*"
+                                                    EditingElementStyle="{StaticResource errorStyle}"
+                                                    Binding="{Binding Notes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <DataGridComboBoxColumn Width="120" Header="Category"
+
+                                SelectedValueBinding="{Binding CategoryId, UpdateSourceTrigger=PropertyChanged}"
+                                SelectedValuePath="CategoryId"
+                                DisplayMemberPath="CategoryName">
+
+                                    <DataGridComboBoxColumn.ElementStyle>
+                                        <Style TargetType="ComboBox">
+                                            <Setter Property="ItemsSource" Value="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type DataGrid}}, Path=DataContext.CategoriesComboBox}" />
+                                        </Style>
+                                    </DataGridComboBoxColumn.ElementStyle>
+                                    <DataGridComboBoxColumn.EditingElementStyle>
+                                        <Style TargetType="ComboBox">
+                                            <Setter Property="ItemsSource" Value="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type DataGrid}}, Path=DataContext.CategoriesComboBox}" />
+                                        </Style>
+                                    </DataGridComboBoxColumn.EditingElementStyle>
+                                </DataGridComboBoxColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </TabItem>
+            </TabControl>
+        </Grid>
+    </DockPanel>
+</controls:MetroWindow>
