@@ -92,7 +92,7 @@
 
                     <DataGrid.Columns>
 
-                        <DataGridTextColumn Header=" Name " Width="150" Binding="{Binding Name, ValidatesOnNotifyDataErrors=True, ValidatesOnDataErrors=True, NotifyOnValidationError=True, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                        <DataGridTextColumn Header=" Name " Width="150" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True}" EditingElementStyle="{StaticResource errorStyle}">
                             <DataGridTextColumn.HeaderTemplate>
                                 <DataTemplate>
                                     <StackPanel Orientation="Vertical">
@@ -103,7 +103,7 @@
                             </DataGridTextColumn.HeaderTemplate>
                         </DataGridTextColumn>
 
-                        <DataGridTextColumn Header=" Email " Width="150" Binding="{Binding Email, ValidatesOnNotifyDataErrors=True, ValidatesOnDataErrors=True, NotifyOnValidationError=True, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                        <DataGridTextColumn Header=" Email " Width="150" Binding="{Binding Email, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True}" EditingElementStyle="{StaticResource errorStyle}">
                             <DataGridTextColumn.HeaderTemplate>
                                 <DataTemplate>
                                     <StackPanel Orientation="Vertical">
@@ -114,7 +114,7 @@
                             </DataGridTextColumn.HeaderTemplate>
                         </DataGridTextColumn>
 
-                        <DataGridTextColumn Header="Phone" Width="*" Binding="{Binding Phone, ValidatesOnNotifyDataErrors=True, ValidatesOnDataErrors=True, NotifyOnValidationError=True, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <DataGridTextColumn Header="Phone" Width="*" Binding="{Binding Phone, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True}" EditingElementStyle="{StaticResource errorStyle}"/>
 
                     </DataGrid.Columns>
 
