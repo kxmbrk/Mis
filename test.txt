@@ -688,4 +688,157 @@ namespace Tqt.Mes.Controllers
     }
 }
 
+-----------------------------------------------------------
+using System;
+using System.Collections.Generic;
+using System.Configuration;
+using System.Linq;
+using Dapper;
+using Oracle.ManagedDataAccess.Client;
+using Tqt.Mes.Support.Utilities;
 
+namespace Tqt.Mes.Models.SwrOctane.Repositories
+{
+    public class SwrRepository : BaseRepository
+    {
+        private string GetConnectionString()
+        {
+            return ConfigurationManager.ConnectionStrings["MesUserCS"].ToString();
+        }
+
+        public Tuple<IEnumerable<SwrMasterSummaryModel>, int> GetAllSummaries(ShapingRequest request)
+        {
+            var pageStart = request.PerPage * (request.Page - 1);
+            var pageEnd = pageStart + request.PerPage;
+            var sortOrder = string.Empty;
+            if (!string.IsNullOrEmpty(request.SortByProperty))
+            {
+                sortOrder = request.SortOrder == SortOrder.Ascending ? $" ORDER BY {request.SortByProperty} ASC" : $" ORDER BY {request.SortByProperty} DESC";
+            }
+
+            using (var dbConn = new OracleConnection(GetConnectionString()))
+            {
+                dbConn.Open();
+                var strQuery = $@"select * 
+                                  from 
+                                ( select rownum rnum, a.*
+                                    from ({SelectColumnList<SwrMasterSummaryModel>(request.SearchPropertiesAndTerms)}) a
+                                   where rownum <= {pageEnd} 
+                                )
+                                where rnum > {pageStart}
+                                {sortOrder}";
+
+                var strCountQuery = SelectCount<SwrMasterSummaryModel>();
+
+                var items = dbConn.Query<SwrMasterSummaryModel>(strQuery);
+                var count = dbConn.ExecuteScalar(strCountQuery);
+                return Tuple.Create(items, Convert.ToInt32(count));
+            }
+        }
+
+        public IEnumerable<object> GetDistinctColumnValues(string columnName)
+        {
+            using (var dbConn = new OracleConnection(GetConnectionString()))
+            {
+                dbConn.Open();
+                var strQuery = SelectDistinctColumnValues<SwrMasterSummaryModel>(columnName);
+                var items = dbConn.Query<string>(strQuery);
+                var itemsList = new List<string>(items);
+
+                itemsList.Sort();
+
+                return itemsList;
+            }
+        }
+
+        public IEnumerable<string> GetAllProducts(string productType)
+        {
+            using (var dbConn = new OracleConnection(GetConnectionString()))
+            {
+                dbConn.Open();
+                var strQuery = string.Empty;
+
+                switch (productType)
+                {
+                    case MesUtilities.ProductTypeBaw:
+                        strQuery = $"SELECT prod FROM swrdata.baw_products ORDER BY prod";
+                        break;
+
+                    case MesUtilities.ProductTypeGaAsGaN:
+                        strQuery = $@"SELECT DISTINCT prod FROM pub.wipprr
+                                        WHERE facility = '{SwrUtilities.FacilityGaasmw}'
+                                            AND prod NOT IN (SELECT prod FROM swrdata.baw_products)
+                                            AND ws_erase_date_time IS NULL
+                                        ORDER BY prod";
+                        break;
+                    case MesUtilities.ProductTypePackagedPart:
+                        strQuery = $@"SELECT prod FROM pub.wipprd
+                                        WHERE facility = '{SwrUtilities.FacilityGaaste}'
+                                            AND ws_erase_date_time IS NULL
+                                        ORDER BY prod";
+
+                        break;
+
+                    case MesUtilities.ProductTypeAmma:
+                        strQuery = $@"SELECT prod FROM pub.wipprd
+                                        WHERE facility = '{SwrUtilities.FacilityGaasma}'
+                                            AND ws_erase_date_time IS NULL
+                                        ORDER BY prod";
+                        break;
+                }
+
+                var items = dbConn.Query<string>(strQuery);
+                return items;
+            }
+        }
+
+        public IEnumerable<string> GetRoutesForProducts(List<string> products)
+        {
+            using (var dbConn = new OracleConnection(GetConnectionString()))
+            {
+                dbConn.Open();
+
+                var strQuery = $@"SELECT DISTINCT ROUTE
+                                    FROM PUB.WIPPRR
+                                    WHERE PROD IN ({string.Join(",", products.Select(x => $"'{x}'"))})
+                                    AND WS_ERASE_DATE_TIME IS NULL
+                                    ORDER BY ROUTE";
+
+                var items = dbConn.Query<string>(strQuery);
+                return items;
+            }
+        }
+
+        public IEnumerable<QorvoEmployee> GetEmployeeList(string lastName)
+        {
+            using (var dbConn = new OracleConnection(GetConnectionString()))
+            {
+                dbConn.Open();
+
+                var strQuery = SelectColumnList<QorvoEmployee>(new List<KeyValuePair<string, string>>
+                {
+                    new KeyValuePair<string, string>("EmpLastName", lastName)
+                });
+
+                var items = dbConn.Query<QorvoEmployee>(strQuery);
+                return items;
+            }
+        }
+
+        public QorvoEmployee GetEmployeeByUserName(string userName)
+        {
+            using (var dbConn = new OracleConnection(GetConnectionString()))
+            {
+                dbConn.Open();
+
+                var strQuery = SelectColumnList<QorvoEmployee>(new List<KeyValuePair<string, string>>
+                {
+                    new KeyValuePair<string, string>("Samacctname", userName)
+                });
+
+                var items = dbConn.Query<QorvoEmployee>(strQuery);
+                return items.FirstOrDefault();
+            }
+        }
+    }
+}
