@@ -1,844 +1,234 @@
-@{
-    ViewBag.Title = "SWR-Octane";
-    ViewBag.UseModernJquery = true;
-}
+    function moveRouteUp(event, routeStr) {
+        event.preventDefault();
 
-<h2>View All SWRs</h2>
+        for (var i = 0; i < model.Routes.length; ++i) {
+            var route = model.Routes[i];
+            if (route.Route === routeStr) {
+                if (i === 0) return false;
 
-<p>
-    @Html.ActionLink("Create New SWR", "CreateNewSwr")
-</p>
+                var routeToSwap = model.Routes[i - 1];
+                model.Routes[i - 1] = route;
+                model.Routes[i] = routeToSwap;
 
-<style>
-    html, body {
-        font-size: 11px;
+                var tempScrollTop = $(window).scrollTop();
+
+                var htmlRoute = $('#' + trimIllegalIdChars(route.Route));
+                var htmlRouteToSwap = $('#' + trimIllegalIdChars(routeToSwap.Route));
+
+                htmlRoute.insertBefore(htmlRouteToSwap);
+                $(window).scrollTop(tempScrollTop);
+
+                indicateLastMovedRow(htmlRoute);
+
+                break;
+            }
+        }
     }
 
-    .ui-multiselect-header a:hover {
-        text-decoration: none;
+    function moveRouteDown(event, routeStr) {
+        event.preventDefault();
+
+        for (var i = 0; i < model.Routes.length; ++i) {
+            var route = model.Routes[i];
+            if (route.Route === routeStr) {
+                if (i === (model.Routes.length - 1)) return false;
+
+                var routeToSwap = model.Routes[i + 1];
+                model.Routes[i + 1] = route;
+                model.Routes[i] = routeToSwap;
+
+                var tempScrollTop = $(window).scrollTop();
+
+                var htmlRoute = $('#' + trimIllegalIdChars(route.Route));
+                var htmlRouteToSwap = $('#' + trimIllegalIdChars(routeToSwap.Route));
+
+                htmlRoute.insertAfter(htmlRouteToSwap);
+                $(window).scrollTop(tempScrollTop);
+
+                indicateLastMovedRow(htmlRoute);
+
+                break;
+            }
+        }
     }
 
-    .ui-multiselect-close {
-        margin-right: 3px;
+    function updateOperTable(route, lastMovedOperNum) {
+        var markup = '';
+        if (route) {
+
+            markup += '<table class="full-width">'
+                + '<thead>'
+                + '   <tr>'
+                + '       <th>Oper</th>'
+                + '       <th>Description</th>'
+                + '       <th>Mvin Ins</th>'
+                + '       <th>Mvout Ins</th>'
+                + '       <th>Tools</th>'
+                + '       <th>Splits</th>'
+                + '       <th>Edc</th>'
+                + '       <th>Flow Control</th>'
+                + '       <th>Move</th>'
+                + '   </tr>'
+                + '</thead>'
+                + '<tbody id="opers-tbody">';
+
+            for (var o = 0; o < route.Opers.length; ++o) {
+                var oper = route.Opers[o];
+
+                markup += '<tr id="' + trimIllegalIdChars(route.Route) + '-' + oper.Oper.toString() + '" class="oper-row' + (lastMovedOperNum === oper.Oper ? ' last-moved-row' : '') + '">'
+                    + '    <td><a href="#" class="oper-link" onclick="javascript:editOper(\'' + route.Route + '\', ' + oper.Oper.toString() + ')">' + oper.Oper.toString() + '</a></td>'
+                    + '    <td>' + oper.OperShortDesc + '</td>'
+                    + '    <td>' + oper.SpecIns + '</td>'
+                    + '    <td>' + oper.SpecInsMvout + '</td>'
+                    + '    <td>' + oper.Tools + '</td>'
+                    + '    <td>' + oper.RecipeSplitGroup + '</td>'
+                    + '    <td>' + oper.EdcOptions + '</td>'
+                    + '    <td>' + oper.FlowControl + '</td>'
+                    + '    <td class="move-arrows">'
+                    + '        <a href="#" class="up" onclick="javascript:moveOperUp(event, \'' + route.Route + '\', ' + oper.Oper.toString() + ')"><i class="fa fa-arrow-up"></i></a> | '
+                    + '        <a href="#" class="down" onclick="javascript:moveOperDown(event, \'' + route.Route + '\', ' + oper.Oper.toString() + ')"><i class="fa fa-arrow-down"></i></a>'
+                    + '    </td>'
+                    + '</tr>'
+            }
+
+            markup += '</tbody>'
+                + '</table>';
+        }
+
+        $("#opers").show();
+        $("#opers").html(markup);
     }
 
-    #gbox_list.ui-jqgrid-jquery-ui {
-        width: 99%;
+    lastMovedRowsContext = {};
+    function indicateLastMovedRow(lastMovedRow) {
+        var r = lastMovedRowsContext[lastMovedRow.attr('id')];
+        if (r && r.__fadeOutLastMoved) {
+            clearTimeout(r.__fadeOutLastMoved);
+            r.__fadeOutLastMoved = null;
+            lastMovedRow.removeClass('last-moved-row fade-out');
+
+            if (r.__fadeOutLastMoved2) {
+                clearTimeout(r.__fadeOutLastMoved2);
+                lastMovedRow.removeClass('last-moved-row fade-out');
+                r.__fadeOutLastMoved2 = null;
+            }
+        }
+
+        lastMovedRow.addClass('last-moved-row');
+
+        if (!r) {
+            r = lastMovedRowsContext[lastMovedRow.attr('id')] = {};
+        }
+
+        r.__fadeOutLastMoved = setTimeout(function () {
+            lastMovedRow.addClass("fade-out");
+            r.__fadeOutLastMoved2 = setTimeout(function () {
+                lastMovedRow.removeClass('last-moved-row fade-out');
+                r.__fadeOutLastMoved = null;
+                r.__fadeOutLastMoved2 = null;
+            }, 3000);
+        }, 2000);
     }
 
-    .center {
-        text-align: center;
+    function showOpers(routeStr) {
+        for (var i = 0; i < model.Routes.length; ++i) {
+            var route = model.Routes[i];
+
+            if (route.Route === routeStr) {
+                updateOperTable(route);
+                break;
+            }
+        }
     }
 
-    a.swr-id-link {
-        text-decoration: none;
-        color: #d32525;
-    }
-</style>
+    function moveOperUp(event, routeStr, operNum) {
+        event.preventDefault();
 
+        var didUpdateOperTable = false;
 
-<table id="list"></table>
+        for (var i = 0; i < model.Routes.length; ++i) {
+            var route = model.Routes[i];
+            if (route.Route === routeStr) {
+                for (var o = 0; o < route.Opers.length; ++o) {
+                    var oper = route.Opers[o];
 
-<br />
+                    if (oper.Oper === operNum) {
+                        if (o === 0) return false;
 
-<table>
-    <tbody>
-        <tr>
-            <td style="text-align: center;">
-                <img width='16' height='16' src="@Url.Content("../images/comp.gif")" alt="Complete">
-            </td>
-            <td style="text-align: center;">
-                <img width='16' height='16' src="@Url.Content("../images/new.png")" alt="Lot TBD">
-            </td>
-            <td style="text-align: center;">
-                <img width='16' height='16' src="@Url.Content("../images/run.png")" alt="Run">
-            </td>
-            <td style="text-align: center;">
-                <img width='16' height='16' src="@Url.Content("../images/wait.png")" alt="Que">
-            </td>
-            <td style="text-align: center;">
-                <img width='16' height='16' src="@Url.Content("../images/hold.png")" alt="Hold">
-            </td>
-            <td style="text-align: center;">
-                <img width='16' height='16' src="@Url.Content("../images/check.png")" alt="Hold Dispositioned">
-            </td>
-            <td style="text-align: center;">
-                <img width='16' height='16' src="@Url.Content("../images/down.png")" alt="Down">
-            </td>
-            <td style="text-align: center;">
-                <img width='16' height='16' src="@Url.Content("../images/hot.png")" alt="Hot">
-            </td>
-            <td style="text-align: center;">
-                <span id="ContentPlaceHolder1_hhcValue" style="color:White;background-color:Red;font-weight:bold;">HC</span>
-            </td>
-            <td style="text-align: center;">
-                <img width='16' height='16' src="@Url.Content("../images/info_g.png")" alt="Inventory">
-            </td>
-            <td style="text-align: center;">
-                <img width='16' height='16' src="@Url.Content("../images/Warning.png")" alt="Off-Flow" width="16" height="16">
-            </td>
-            <td style="text-align: center;">
-                <img width='16' height='16' src="@Url.Content("../images/remove.gif")" alt="Terminated">
-            </td>
-        </tr>
-        <tr>
-            <td style="text-align: center;">Complete</td>
-            <td style="text-align: center;">Lot TBD</td>
-            <td style="text-align: center;">Run</td>
-            <td style="text-align: center;">Que</td>
-            <td style="text-align: center;">Hold</td>
-            <td style="text-align: center;">Dispositioned</td>
-            <td style="text-align: center;">Down</td>
-            <td style="text-align: center;">Hot</td>
-            <td style="text-align: center;">HHC</td>
-            <td style="text-align: center;">Inventory</td>
-            <td style="text-align: center;">Off Flow</td>
-            <td style="text-align: center;">Terminated</td>
-        </tr>
-    </tbody>
-</table>
-<script type="text/javascript">
+                        var operToSwap = route.Opers[o - 1];
+                        route.Opers[o - 1] = oper;
+                        route.Opers[o] = operToSwap;
 
-    var distinctDataColumns = {};
+                        var tempScrollTop = $(window).scrollTop();
 
-    function getDistinctColumnValues(columnName, callback) {
-        $.ajax({
-            url: '@Url.Content("~/SwrOctane/GetDistinctColumnValues?columnName=")' + columnName,
-            type: 'GET',
-            success: function (data) {
-                distinctDataColumns[columnName] = data;
-                if (callback) callback();
-            },
-        });
-    }
+                        var htmlOper = $('#' + trimIllegalIdChars(route.Route) + '-' + oper.Oper.toString());
+                        var htmlOperToSwap = $('#' + trimIllegalIdChars(route.Route) + '-' + operToSwap.Oper.toString());
 
-    var dataInitMultiselect = function (elem, searchOptions) {
-        var $grid = $(this);
-        setTimeout(function () {
-            var $elem = $(elem),
-                id = elem.id,
-                inToolbar = searchOptions.mode === "filter",
-                options = {
-                    selectedList: 2,
-                    height: "auto",
-                    checkAllText: "all",
-                    uncheckAllText: "no",
-                    noneSelectedText: "Any",
-                    open: function () {
-                        var $menu = $(".ui-multiselect-menu:visible");
-                        $menu.width("auto");
-                        var height = $menu.find(">ul>li").first().outerHeight();
-                        $menu.find(">ul").css("maxHeight", 5 * Math.max(height, 12));
-                        return;
+                        htmlOper.insertBefore(htmlOperToSwap);
+                        $(window).scrollTop(tempScrollTop);
+
+                        indicateLastMovedRow(htmlOper);
+
+                        break;
                     }
-                },
-                $options = $elem.find("option");
-            if ($options.length > 0 && $options[0].selected) {
-                $options[0].selected = false; // unselect the first selected option
-
-            }
-            if (inToolbar) {
-                options.minWidth = "auto";
-            }
-            $grid.triggerHandler("jqGridRefreshFilterValues");
-            $elem.multiselect(options);
-            // replace icons ui-icon-check, ui-icon-closethick, ui-icon-circle-close
-            // and ui-icon-triangle-1-s to font awesome icons
-            var $header = $elem.data("echMultiselect").header;
-            $header.find("span.ui-icon.ui-icon-check")
-                .removeClass("ui-icon ui-icon-check")
-                .addClass("fa fa-fw fa-check");
-            $header.find("span.ui-icon.ui-icon-closethick")
-                .removeClass("ui-icon ui-icon-closethick")
-                .addClass("fa fa-fw fa-times");
-            $header.find("span.ui-icon.ui-icon-circle-close")
-                .removeClass("ui-icon ui-icon-circle-close")
-                .addClass("fa fa-times-circle");
-            $elem.data("echMultiselect")
-                .button
-                .find("span.ui-icon.ui-icon-triangle-1-s")
-                .removeClass("ui-icon ui-icon-triangle-1-s")
-                .addClass("fa fa-caret-down")
-                .css({
-                    float: "right",
-                    marginRight: "5px"
-                });
-
-            $elem.siblings("button.ui-multiselect").css({
-                width: "100%",
-                margin: "1px 0",
-                paddingTop: ".3em",
-                paddingBottom: ".3em"
-            });
-        }, 50);
-    },
-
-    grid = $("#list"),
-    getUniqueNames = function (columnName) {
-        var texts = distinctDataColumns[columnName], uniqueTexts = [],
-            textsLength = texts.length, text, textsMap = {}, i;;
-        if (!texts) return [];
-
-        for (i = 0; i < textsLength; i++) {
-            text = texts[i];
-            var html = $(text);
-            var value = html.find('.value');
-            if (value && value.length > 0) {
-                text = value.html();
-            }
-
-            if (text !== undefined && textsMap[text] === undefined && text) {
-                // to test whether the texts is unique we place it in the map.
-                textsMap[text] = true;
-                uniqueTexts.push(text);
-            }
-        }
-        return uniqueTexts;
-    },
-    buildSearchSelect = function (uniqueNames) {
-        var values = ":All";
-        $.each(uniqueNames, function () {
-            values += ";" + this + ":" + this;
-        });
-        return values;
-    },
-    setSearchSelect = function (columnName) {
-        grid.jqGrid('setColProp', columnName,
-            {
-                stype: 'select',
-                searchoptions: {
-                    value: buildSearchSelect(getUniqueNames(columnName)),
-                    sopt: ['eq']
                 }
+
+                didUpdateOperTable = true;
+
+                break;
             }
-        );
-    };
-
-    swrIdLinkFormatter = function (cellValue, options, rowObject) {
-        if (rowObject.SwrStatus == "Pending") {
-            return "<div class='center'><a class='swr-id-link' href='@Url.Content("../TXMES/SWRBuilder/Builder.aspx?swr=")" + cellValue + "' target='self'>" + cellValue + "</a></div>";
-        }
-        else {
-            return "<div class='center'><a class='swr-id-link' href='@Url.Content("../TXMES/SWRBuilder/SWR_Approval.aspx?swr=")" + cellValue + "' target='self'>" + cellValue + "</a></div>";
-        }
-    };
-
-    routeLinkFormatter = function (cellValue, options, rowObject) {
-        return "<div class='center'><a href='@Url.Content("../TXMES/SWRBuilder/FlowViewer.aspx?lot=")" + rowObject.Lot
-            + "&product=" + rowObject.Product
-            + "&swrNum=" + rowObject.SwrId
-            + "' target='self'><img src=\"@Url.Content("../images/link.png")\" /></a></div>";
-    };
-
-    hotImgFormatter = function (cellValue, options, rowObject) {
-        if (cellValue === "HOT") {
-            return "<div class='center'><img width='16' height='16' src=\"@Url.Content("../images/hot.png")\" /><span class='value' style='display: none;'>" + cellValue + "</span></div>";
-        }
-        else if (cellValue === "HC") {
-            return "<div class='center'><span style='color: White; background-color: Red; font-weight: bold;'>HC</span><span class='value' style='display: none;'>" + cellValue + "</span></div>";
-        }
-        else if (cellValue) {
-            return "<div class='center'><span>" + cellValue + "<span><span class='value' style='display: none;'>" + cellValue + "</span></div>";
-        }
-        else {
-            return "";
-        }
-    };
-
-    lotStatusFormatter = function (cellValue, options, rowObject) {
-        if (cellValue === "DOWN") {
-            return "<div class='center'><img width='16' height='16' src=\"@Url.Content("../images/down.png")\" /></div>";
-        }
-        else if (cellValue === "HOLD DISP") {
-            return "<div class='center'><img width='16' height='16' src=\"@Url.Content("../images/check.png")\" /></div>";
-        }
-        else if (cellValue === "HOLD") {
-            return "<div class='center'><img width='16' height='16' src=\"@Url.Content("../images/hold.png")\" /></div>";
-        }
-        else if (cellValue === "INVENTORY") {
-            return "<div class='center'><img width='16' height='16' src=\"@Url.Content("../images/info_g.png")\" /></div>";
-        }
-        else if (cellValue === "COMP") {
-            return "<div class='center'><img width='16' height='16' src=\"@Url.Content("../images/comp.gif")\" /></div>";
-        }
-        else if (cellValue === "TBD") {
-            return "<div class='center'><img width='16' height='16' src=\"@Url.Content("../images/help.png")\" /></div>";
-        }
-        else if (cellValue === "OFF-FLOW") {
-            return "<div class='center'><img width='16' height='16' src=\"@Url.Content("../images/warning.png")\" /></div>";
-        }
-        else if (cellValue === "TERMINATED") {
-            return "<div class='center'><img width='16' height='16' src=\"@Url.Content("../images/remove.png")\" /></div>";
-        }
-        else if (cellValue === "RUN") {
-            return "<div class='center'><img width='16' height='16' src=\"@Url.Content("../images/run.png")\" /></div>";
-        }
-        else if (cellValue === "QUEUE") {
-            return "<div class='center'><img width='16' height='16' src=\"@Url.Content("../images/wait.png")\" /></div>";
-        }
-        else if (cellValue === "NEW") {
-            return "<div class='center'><img width='16' height='16' src=\"@Url.Content("../images/new.png")\" /></div>";
-        }
-        else if (cellValue) {
-            return "<div class='center'>" + cellValue + "</div>";
-        }
-        else {
-            return "";
-        }
-    };
-
-    getDistinctColumnValues("Hot", function () {
-        getDistinctColumnValues("LotStatus", function () {
-            $("#list").jqGrid({
-                url: "/SwrOctane/GetAll/",
-                datatype: "json",
-                mtype: "GET",
-                autowidth: true,
-                shrinkToFit: true,
-                forceClientSorting: false,
-                loadonce: false,
-                iconSet: "fontAwesome",
-                jsonReader: {
-                    total: function (response) {
-                        var pageCount = parseInt(response.total) / grid.getGridParam('rowNum');;
-                        var flooredPageCount = Math.floor(pageCount);
-                        if (pageCount > flooredPageCount) {
-                            pageCount = flooredPageCount + 1;
-                        }
-                        return pageCount;
-                    },
-                    records: function (response) {
-                        return response.total;
-                    },
-                },
-                colNames: ["SWR",
-                    "SWR Type",
-                    "Is R&D",
-                    "Flow Type",
-                    "Originator",
-                    "SWR Status",
-                    "Hot",
-                    "Product",
-                    "Lot",
-                    "Lot Type",
-                    "Qty",
-                    "Lot Status",
-                    "Flow Viewer",
-                    "Hrs at Oper",
-                    "Current Operation",
-                    "%"],
-                colModel: [
-                    { name: "SwrId", width: 25, formatter: swrIdLinkFormatter },
-                    { name: "SwrProdType", width: 27 },
-                    { name: "IsRndSwr", width: 20 },
-                    { name: "FlowType", width: 30 },
-                    { name: "Owner", width: 35 },
-                    { name: "SwrStatus", width: 30 },
-                    { name: "Hot", width: 18, formatter: hotImgFormatter },
-                    { name: "Product", width: 35 },
-                    { name: "Lot", width: 45 },
-                    { name: "LotType", width: 20 },
-                    { name: "Qty", width: 15 },
-                    { name: "LotStatus", width: 30, formatter: lotStatusFormatter },
-                    { name: "FlowViewerRouteLink", width: 20, formatter: routeLinkFormatter, sortable: false, search: false },
-                    { name: "HrsAtOp", width: 35 },
-                    { name: "CurrentOper", width: 45 },
-                    { name: "PctStr", width: 15 },
-                ],
-                rowNum: 15,
-                loadui: "block",
-                multiselect: false,
-                multiPageSelection: true,
-                //multipleSelectSeparator: ";",
-                inFilterSeparator: ";",
-                loadComplete: function () {
-
-                    setSearchSelect('Hot');
-                    setSearchSelect('LotStatus');
-
-                    jQuery("#list").jqGrid("filterToolbar", {
-                        stringResult: true,
-                        searchOnEnter: true,
-                        defaultSearch: 'eq',
-                        beforeClear: function () {
-                            $(this.grid.hDiv).find(".ui-search-toolbar .ui-search-input>select[multiple] option").each(function () {
-                                this.selected = false; // unselect all options
-                            });
-
-                            $(this.grid.hDiv).find(".ui-search-toolbar button.ui-multiselect").each(function () {
-                                $(this).prev("select[multiple]").multiselect("refresh");
-                            }).css({
-                                width: "98%",
-                                marginTop: "1px",
-                                marginBottom: "1px",
-                                paddingTop: "3px"
-                            });
-                        }
-                    });
-                    jQuery("#list").jqGrid('setGridHeight', 400);
-                },
-                rowList: [15, 30, 50, 100],
-                pager: true,
-                pagerRightWidth: 135, // fix wrapping or right part of the pager
-                viewrecords: true,
-                sortable: true,
-                sortname: "SwrId",
-                sortorder: "desc"
-            }).jqGrid("navGrid", { edit: false, add: false, del: false, search: false });
-        });
-    });
-
-</script>
-
----------------------------------------------------
-using Newtonsoft.Json;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Net;
-using System.Web.Mvc;
-using Tqt.Mes.Models;
-using Tqt.Mes.Models.Mes;
-using Tqt.Mes.Models.SwrOctane;
-using Tqt.Mes.Models.SwrOctane.Repositories;
-using Tqt.Mes.Support.Security;
-using Tqt.Mes.Support.Utilities;
-
-namespace Tqt.Mes.Controllers
-{
-    public class SwrOctaneController : SecureController
-    {
-        private readonly SwrRepository _repository = new SwrRepository();
-        private readonly IRAndCategoriesRepository _rndRepository = new RAndCategoriesRepository();
-
-        public ActionResult Index()
-        {
-           
-            return View();
         }
 
-        public ContentResult EchoJson()
-        {
-            var stream = Request.InputStream;
-            stream.Seek(0, System.IO.SeekOrigin.Begin);
-            var queryParams = new StreamReader(stream).ReadToEnd();
-
-            var dict = queryParams.Split('&').ToDictionary(x => x.Split('=')[0], x => x.Split('=')[1]);
-
-            var strJson = WebUtility.UrlDecode(dict["json"]);
-
-            return new ContentResult
-            {
-                Content = strJson,
-                ContentType = "application/json"
-            };
+        if (!didUpdateOperTable) {
+            $("#opers").hide();
         }
+    }
 
-        public JsonResult GetDistinctColumnValues(string columnName)
-        {
-            var values = _repository.GetDistinctColumnValues(columnName);
+    function moveOperDown(event, routeStr, operNum) {
+        event.preventDefault();
 
-            return Json(values, JsonRequestBehavior.AllowGet);
-        }
+        var didUpdateOperTable = false;
 
-        public JsonResult GetAll()
-        {
-            var queryString = Request.QueryString.AllKeys.ToDictionary(x => x, x => Request.QueryString[x]);
+        for (var i = 0; i < model.Routes.length; ++i) {
+            var route = model.Routes[i];
+            if (route.Route === routeStr) {
+                for (var o = 0; o < route.Opers.length; ++o) {
+                    var oper = route.Opers[o];
 
-            ShapingRequest request = new ShapingRequest();
-            request.Page = Convert.ToInt32(queryString["page"]);
-            request.PerPage = Convert.ToInt32(queryString["rows"]);
-            request.SortByProperty = queryString["sidx"];
+                    if (oper.Oper === operNum) {
+                        if (o === (route.Opers.length - 1)) return false;
 
-            if (queryString["sord"] == "asc")
-                request.SortOrder = SortOrder.Ascending;
-            else
-                request.SortOrder = SortOrder.Descending;
+                        var operToSwap = route.Opers[o + 1];
+                        route.Opers[o + 1] = oper;
+                        route.Opers[o] = operToSwap;
 
+                        // preserve scroll
 
-            bool doSearch = queryString["_search"] == "true";
-            if (doSearch)
-            {
-                queryString.Remove("page");
-                queryString.Remove("rows");
-                queryString.Remove("sord");
-                queryString.Remove("nd");
-                queryString.Remove("_search");
-                queryString.Remove("sidx");
+                        var tempScrollTop = $(window).scrollTop();
 
-                request.SearchPropertiesAndTerms = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, string>>();
-                if (queryString.ContainsKey("filters"))
-                {
-                    dynamic filters = JsonConvert.DeserializeObject(queryString["filters"]);
-                    foreach (var rule in filters["rules"])
-                    {
-                        request.SearchPropertiesAndTerms.Add(new KeyValuePair<string, string>(rule["field"].ToString(), rule["data"].ToString()));
+                        var htmlOper = $('#' + trimIllegalIdChars(route.Route) + '-' + oper.Oper.toString());
+                        var htmlOperToSwap = $('#' + trimIllegalIdChars(route.Route) + '-' + operToSwap.Oper.toString());
+
+                        htmlOper.insertAfter(htmlOperToSwap);
+                        $(window).scrollTop(tempScrollTop);
+
+                        indicateLastMovedRow(htmlOper);
+
+                        break;
                     }
-
-                    queryString.Remove("filters");
                 }
 
-                foreach (var kvp in queryString)
-                {
-                    request.SearchPropertiesAndTerms.Add(new KeyValuePair<string, string>(kvp.Key, kvp.Value));
-                }
-            }
+                didUpdateOperTable = true;
 
-            var items = _repository.GetAllSummaries(request);
-            foreach (var item in items.Item1)
-            {
-                item.PrepForView();
-            }
-
-            return Json(
-                new
-                {
-                    rows = items.Item1,
-                    total = items.Item2
-                }, JsonRequestBehavior.AllowGet);
-        }
-
-        public JsonResult GetRoutesForProducts(List<string> products)
-        {
-            if (true == products?.Any())
-            {
-                var values = _repository.GetRoutesForProducts(products.ToList());
-                return Json(values);
-            }
-            else
-            {
-                return Json(new string[] { });
+                break;
             }
         }
 
-        public JsonResult GetEmployeeList(string lastName)
-        {
-            var employees = _repository.GetEmployeeList(lastName);
-            return Json(employees, JsonRequestBehavior.AllowGet);
-        }
-
-        private void PopulateSwrCreateNewModel(SwrCreateNewModel model)
-        {
-            model.AllProducts = new List<string>(_repository.GetAllProducts(MesUtilities.ProductTypeBaw));
-            model.PurposeBandList = _rndRepository.GetValueForCatetgory("BAND").Select(x => x.Val).ToList();
-            model.PurposeProjectList = _rndRepository.GetValueForCatetgory("PROJECT").Select(x => x.Val).ToList();
-            model.PurposeFlowList = _rndRepository.GetValueForCatetgory("FLOW").Select(x => x.Val).ToList();
-            model.PurposeTypeList = _rndRepository.GetValueForCatetgory("TYPE").Select(x => x.Val).ToList();
-            model.PurposeGroupList = _rndRepository.GetValueForCatetgory("DEPARTMENT").Select(x => x.Val).ToList();
-            model.AllApprovers = GetAllApprovers();
-
-            var requester = _repository.GetEmployeeByUserName(model.RequestorUserId);
-            var originator = _repository.GetEmployeeByUserName(model.OriginatorUserId);
-
-            if (requester != null)
-            {
-                model.RequestorName = $"{requester.EmpFirstName} {requester.EmpLastName}";
-            }
-
-            if (originator != null)
-            {
-                model.OriginatorName = $"{originator.EmpFirstName} {originator.EmpLastName}";
-            }
-        }
-
-        [HttpGet]
-        public ActionResult CreateNewSwr()
-        {
-            var model = new SwrCreateNewModel();
-            //TODO: Populate properties to be displayed on the view.
-
-            model.SwrDisplayId = "TBD";
-
-            var userId = User.Identity.Name;
-            model.RequestorUserId = userId?.ToLower();
-            model.OriginatorUserId = userId?.ToLower();
-
-            PopulateSwrCreateNewModel(model);
-
-            return View(model);
-        }
-
-        [HttpPost]
-        public ActionResult CreateNewSwr(SwrCreateNewModel model)
-        {
-            PopulateSwrCreateNewModel(model);
-
-            if (!ValidateModel(model))
-            {
-                return View(model);
-            }
-
-            return View(model);
-        }
-
-        private bool ValidateModel(SwrCreateNewModel model)
-        {
-            ModelState.AddModelError("Validation", "Automatically failed validation.");
-
-            return false;
-        }
-
-        private Dictionary<string, List<KeyValuePair<string, string>>> GetAllApprovers()
-        {
-            var retVal = new Dictionary<string, List<KeyValuePair<string, string>>>();
-
-            var productTypeList = new List<string>
-            {
-                MesUtilities.ProductTypeBaw,
-                MesUtilities.ProductTypeGaAsGaN,
-                MesUtilities.ProductTypeAmma,
-                MesUtilities.ProductTypePackagedPart
-            };
-
-            foreach (var productType in productTypeList)
-            {
-                var groupName = GetPeerReviewGroupName(productType);
-
-                if(!retVal.ContainsKey(groupName))
-                {
-                    var approverOptions = GetApproverOptions(groupName);
-                    retVal.Add(groupName, approverOptions);
-                }
-            }
-
-            var groupNameList = new List<string>
-            {
-                SwrUtilities.SwrDeviceEngineer,
-                SwrUtilities.SwrProcessEngineer,
-                SwrUtilities.SwrFabManager,
-                SwrUtilities.SwrQualityAssurance,
-                SwrUtilities.SwrProcessEngineeringManager,
-                SwrUtilities.SwrDeviceManager,
-                SwrUtilities.SwrProcessEngineer,
-                SwrUtilities.SwrPlanning,
-                SwrUtilities.SwrDesignEngineer,
-                SwrUtilities.SwrTeProductEngineer,
-                SwrUtilities.SwrTeProductEngineerManager,
-                SwrUtilities.SwrTeQualityEngineer,
-                SwrUtilities.SwrTeTestEngineer,
-                SwrUtilities.SwrTeProgramManager,
-                SwrUtilities.SwrTeSoftwareEngineer,
-                SwrUtilities.SwrTeSoftwareQe,
-                SwrUtilities.SwrBacksideSupervision,
-                SwrUtilities.SwrBawDtrPeer
-            };
-
-            foreach (var groupName in groupNameList)
-            {
-                if (!retVal.ContainsKey(groupName))
-                {
-                    var approverOptions = GetApproverOptions(groupName);
-                    retVal.Add(groupName, approverOptions);
-                }
-            }
-            
-            return retVal;
-        }
-
-        public List<KeyValuePair<string, string>> GetApproverOptions(string groupName)
-        {
-            var retVal = new List<KeyValuePair<string, string>>();
-
-            var userList = LDAP.GetUsersInSecurityGroup(groupName);
-
-            if (userList.Count <= 0) return retVal;
-
-            retVal.Add(new KeyValuePair<string, string>("0", "Choose..."));
-            retVal.Add(new KeyValuePair<string, string>("1", "NA"));
-
-            for (var i = 0; i < userList.Count; i++)
-            {
-                var key = userList.GetKey(i).ToString();
-                var value = userList.GetByIndex(i).ToString();
-
-                retVal.Add(new KeyValuePair<string, string>(key, value));
-            }
-
-            return retVal;
-        }
-
-        private string GetPeerReviewGroupName(string productType)
-        {
-            string peerReviewGroupName;
-            switch (productType)
-            {
-                case MesUtilities.ProductTypeBaw:
-                    peerReviewGroupName = SwrUtilities.SwrDefaultPeer;
-                    break;
-
-                case MesUtilities.ProductTypeGaAsGaN:
-                    peerReviewGroupName = SwrUtilities.SwrGaAsGaNPeer;
-                    break;
-
-                case MesUtilities.ProductTypeAmma:
-                    peerReviewGroupName = SwrUtilities.SwrPkgTstPeer;
-                    break;
-
-                case MesUtilities.ProductTypePackagedPart:
-                    peerReviewGroupName = SwrUtilities.SwrPkgTstPeer;
-                    break;
-
-                default:
-                    peerReviewGroupName = SwrUtilities.SwrDefaultPeer;
-                    break;
-            }
-            return peerReviewGroupName;
+        if (!didUpdateOperTable) {
+            $("#opers").hide();
         }
     }
-}
 
------------------------------------------------------------
-using System;
-using System.Collections.Generic;
-using System.Configuration;
-using System.Linq;
-using Dapper;
-using Oracle.ManagedDataAccess.Client;
-using Tqt.Mes.Support.Utilities;
-
-namespace Tqt.Mes.Models.SwrOctane.Repositories
-{
-    public class SwrRepository : BaseRepository
-    {
-        private string GetConnectionString()
-        {
-            return ConfigurationManager.ConnectionStrings["MesUserCS"].ToString();
-        }
-
-        public Tuple<IEnumerable<SwrMasterSummaryModel>, int> GetAllSummaries(ShapingRequest request)
-        {
-            var pageStart = request.PerPage * (request.Page - 1);
-            var pageEnd = pageStart + request.PerPage;
-            var sortOrder = string.Empty;
-            if (!string.IsNullOrEmpty(request.SortByProperty))
-            {
-                sortOrder = request.SortOrder == SortOrder.Ascending ? $" ORDER BY {request.SortByProperty} ASC" : $" ORDER BY {request.SortByProperty} DESC";
-            }
-
-            using (var dbConn = new OracleConnection(GetConnectionString()))
-            {
-                dbConn.Open();
-                var strQuery = $@"select * 
-                                  from 
-                                ( select rownum rnum, a.*
-                                    from ({SelectColumnList<SwrMasterSummaryModel>(request.SearchPropertiesAndTerms)}) a
-                                   where rownum <= {pageEnd} 
-                                )
-                                where rnum > {pageStart}
-                                {sortOrder}";
-
-                var strCountQuery = SelectCount<SwrMasterSummaryModel>();
-
-                var items = dbConn.Query<SwrMasterSummaryModel>(strQuery);
-                var count = dbConn.ExecuteScalar(strCountQuery);
-                return Tuple.Create(items, Convert.ToInt32(count));
-            }
-        }
-
-        public IEnumerable<object> GetDistinctColumnValues(string columnName)
-        {
-            using (var dbConn = new OracleConnection(GetConnectionString()))
-            {
-                dbConn.Open();
-                var strQuery = SelectDistinctColumnValues<SwrMasterSummaryModel>(columnName);
-                var items = dbConn.Query<string>(strQuery);
-                var itemsList = new List<string>(items);
-
-                itemsList.Sort();
-
-                return itemsList;
-            }
-        }
-
-        public IEnumerable<string> GetAllProducts(string productType)
-        {
-            using (var dbConn = new OracleConnection(GetConnectionString()))
-            {
-                dbConn.Open();
-                var strQuery = string.Empty;
-
-                switch (productType)
-                {
-                    case MesUtilities.ProductTypeBaw:
-                        strQuery = $"SELECT prod FROM swrdata.baw_products ORDER BY prod";
-                        break;
-
-                    case MesUtilities.ProductTypeGaAsGaN:
-                        strQuery = $@"SELECT DISTINCT prod FROM pub.wipprr
-                                        WHERE facility = '{SwrUtilities.FacilityGaasmw}'
-                                            AND prod NOT IN (SELECT prod FROM swrdata.baw_products)
-                                            AND ws_erase_date_time IS NULL
-                                        ORDER BY prod";
-                        break;
-                    case MesUtilities.ProductTypePackagedPart:
-                        strQuery = $@"SELECT prod FROM pub.wipprd
-                                        WHERE facility = '{SwrUtilities.FacilityGaaste}'
-                                            AND ws_erase_date_time IS NULL
-                                        ORDER BY prod";
-
-                        break;
-
-                    case MesUtilities.ProductTypeAmma:
-                        strQuery = $@"SELECT prod FROM pub.wipprd
-                                        WHERE facility = '{SwrUtilities.FacilityGaasma}'
-                                            AND ws_erase_date_time IS NULL
-                                        ORDER BY prod";
-                        break;
-                }
-
-                var items = dbConn.Query<string>(strQuery);
-                return items;
-            }
-        }
-
-        public IEnumerable<string> GetRoutesForProducts(List<string> products)
-        {
-            using (var dbConn = new OracleConnection(GetConnectionString()))
-            {
-                dbConn.Open();
-
-                var strQuery = $@"SELECT DISTINCT ROUTE
-                                    FROM PUB.WIPPRR
-                                    WHERE PROD IN ({string.Join(",", products.Select(x => $"'{x}'"))})
-                                    AND WS_ERASE_DATE_TIME IS NULL
-                                    ORDER BY ROUTE";
-
-                var items = dbConn.Query<string>(strQuery);
-                return items;
-            }
-        }
-
-        public IEnumerable<QorvoEmployee> GetEmployeeList(string lastName)
-        {
-            using (var dbConn = new OracleConnection(GetConnectionString()))
-            {
-                dbConn.Open();
-
-                var strQuery = SelectColumnList<QorvoEmployee>(new List<KeyValuePair<string, string>>
-                {
-                    new KeyValuePair<string, string>("EmpLastName", lastName)
-                });
-
-                var items = dbConn.Query<QorvoEmployee>(strQuery);
-                return items;
-            }
-        }
-
-        public QorvoEmployee GetEmployeeByUserName(string userName)
-        {
-            using (var dbConn = new OracleConnection(GetConnectionString()))
-            {
-                dbConn.Open();
-
-                var strQuery = SelectColumnList<QorvoEmployee>(new List<KeyValuePair<string, string>>
-                {
-                    new KeyValuePair<string, string>("Samacctname", userName)
-                });
-
-                var items = dbConn.Query<QorvoEmployee>(strQuery);
-                return items.FirstOrDefault();
-            }
-        }
+    function editOper(routeStr, operNum) {
+        alert('Would edit: ' + routeStr + ' / ' + operNum.toString());
     }
-}
