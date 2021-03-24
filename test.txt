@@ -1,5 +1,222 @@
+@model Tqt.Mes.Models.SwrOctane.SwrOctaneBuilderModel
+@using Newtonsoft.Json
+
+@{
+    ViewBag.Title = "Build SWR";
+    ViewBag.UseModernJquery = true;
+    ViewBag.UseModernBootstrap = true;
+}
+
+<style>
+
+    .full-width {
+        width: 100%;
+    }
+
+    .move-arrows {
+        width: 50px;
+    }
+
+    .route-link, .oper-link {
+        text-decoration: none;
+        color: #d32525;
+    }
+
+
+    .oper-row:hover, .route-row:hover {
+        background: #ddd;
+    }
+
+    .oper-row, .route-row {
+        background: #fff;
+    }
+
+        .oper-row.last-moved-row, .route-row.last-moved-row {
+            background: rgba(0, 0, 255, 0.2);
+        }
+
+            .oper-row.last-moved-row.fade-out, .route-row.last-moved-row.fade-out {
+                background: rgba(255, 255, 255, 1);
+                transition: background-color 2.5s ease;
+            }
+
+    .main-button {
+        margin-right: 8px;
+        width: 150px;
+    }
+
+    .main-button-right-edge {
+        margin-right: 32px;
+        width: 150px;
+    }
+
+    .delete, .delete a {
+        color: #d32525;
+        text-align: center;
+    }
+
+        .delete:hover, .delete a:hover {
+            color: red;
+        }
+
+</style>
+
+<br />
+
+<div class="row" id="info-box">
+    <div class="col-sm-8">
+        <table class="full-width">
+            <thead>
+                <tr>
+                    <th>SWR ID</th>
+                    <th>Status</th>
+                    <th>Purpose</th>
+                    <th>Originator</th>
+                    <th>Product</th>
+                    <th>Lot Type</th>
+                    <th></th>
+                    <th>Facility</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>@Model.SwrId</td>
+                    <td>@Model.Status</td>
+                    <td>@Model.Purpose</td>
+                    <td>@Model.Originator</td>
+                    <td>@(string.Join(", ", Model.Products))</td>
+                    <td>@Model.LotTypes</td>
+                    <td></td>
+                    <td>@Model.Facility</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="col-sm-4">
+    </div>
+</div>
+
+<br />
+<br />
+
+<button class="undo btn btn-outline-default" onclick="undo(event)">Undo</button>
+<button class="redo btn btn-outline-default" onclick="redo(event)">Redo</button>
+
+<div class="row" id="body">
+    <div class="col-sm-4" id="routes">
+        <table class="full-width">
+            <thead>
+                <tr>
+                    <th>Route</th>
+                    <th>Seq</th>
+                    <th>SWR Ver</th>
+                    <th>WIP Ver</th>
+                    <th>Custom</th>
+                    <th>Move</th>
+                    @if (Model.IsPending)
+                    {
+                    <th>Delete</th>
+                    }
+                </tr>
+            </thead>
+            <tbody id="routes-tbody">
+                @foreach (var route in Model.Routes)
+                {
+                    <tr id="@route.Route.Replace(" ", "-").Replace(".", "-").Replace("#", "-")" class="route-row">
+                        <td><a href="#" class="route-link" onclick="javascript:showOpers('@route.Route')">@route.Route</a></td>
+                        <td>@route.DisplaySequence</td>
+                        <td>@route.SwrRouteVersion</td>
+                        <td>@route.ProductionRouteVersion</td>
+                        <td>@route.Custom</td>
+                        <td class="move-arrows">
+                            <a href="#" class="up" onclick="javascript:moveRouteUp(event, '@route.Route')"><i class="fa fa-arrow-up"></i></a> |
+                            <a href="#" class="down" onclick="javascript:moveRouteDown(event, '@route.Route')"><i class="fa fa-arrow-down"></i></a>
+                        </td>
+                    @if (Model.IsPending)
+                    {
+                        <td class="delete">
+                            <a href="#" onclick="javascript:deleteRoute(event, '@route.Route')"><i class="fa fa-trash-o"></i></a>
+                        </td>
+                    }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="col-sm-8" id="opers" style="display: none;"></div>
+</div>
+
+<br />
+<br />
+<div class="row">
+    <div class="col-sm-6">
+    </div>
+    <div class="col-sm-6 text-right">
+        <button class="btn btn-primary main-button" id="submit-btn" onclick="submitIfChanged(event)">Submit</button>
+        <button class="btn btn-secondary main-button-right-edge" onclick="cancelClicked(event)">Cancel</button>
+    </div>
+</div>
+
+<script type="text/javascript">
+    @{
+        Model.ReplaceNullsWithEmptyStrings();
+
+        var json = JsonConvert.SerializeObject(Model);
+    }
+    @Html.Raw("var model = " + json)
+    @Html.Raw("var originalModel = " + json)
+
+    $("#submit-btn").prop('disabled', !hasChanges());
+
+    var memento = new Memento({ model: model });
+
+    var selectedRoute = null;
+    var selectedOper = null;
+
+    function hasChanges() {
+        return JSON.stringify(model) !== JSON.stringify(originalModel);
+    }
+
+    function cancelClicked(event) {
+        event.preventDefault();
+        if (confirm("Are you sure you want to cancel? Your changes will be lost.")) {
+            window.location.href = '@Url.Action("Index", "SwrOctane")';
+        }
+    }
+
+    function submitIfChanged(event) {
+        event.preventDefault();
+        if (hasChanges()) {
+            alert('Would submit');
+        }
+        else {
+            alert('Would not submit');
+        }
+    }
+
+    function trimIllegalIdChars(idToTrim) {
+        return idToTrim
+            .replace(" ", "-")
+            .replace(".", "-")
+            .replace("#", "-");
+    }
+
+    function findRouteInModel(model, routeToFind) {
+        if (!routeToFind) return null;
+        for (var i = 0; i < model.Routes.length; ++i) {
+            var route = model.Routes[i];
+            if (route.Route === routeToFind.Route) {
+                return route;
+            }
+        }
+
+        return null;
+    }
+
     function moveRouteUp(event, routeStr) {
         event.preventDefault();
+
+        var movedRoute = null;
 
         for (var i = 0; i < model.Routes.length; ++i) {
             var route = model.Routes[i];
@@ -20,13 +237,22 @@
 
                 indicateLastMovedRow(htmlRoute);
 
+                movedRoute = route;
+
                 break;
             }
         }
+
+        memento.current().undoRoute = selectedRoute;
+        memento.current().lastUndoRoute = movedRoute;
+        memento.save({ model: model, redoRoute: selectedRoute, lastRedoRoute: movedRoute });
+        $("#submit-btn").prop('disabled', !hasChanges());
     }
 
     function moveRouteDown(event, routeStr) {
         event.preventDefault();
+
+        var movedRoute = null;
 
         for (var i = 0; i < model.Routes.length; ++i) {
             var route = model.Routes[i];
@@ -47,14 +273,97 @@
 
                 indicateLastMovedRow(htmlRoute);
 
+                movedRoute = route;
+
                 break;
             }
         }
+
+        memento.current().undoRoute = selectedRoute;
+        memento.current().lastUndoRoute = movedRoute;
+        memento.save({ model: model, redoRoute: selectedRoute, lastRedoRoute: movedRoute });
+        $("#submit-btn").prop('disabled', !hasChanges());
     }
 
-    function updateOperTable(route, lastMovedOperNum) {
+    function deleteRoute(event, routeStr) {
+        event.preventDefault();
+
+        var deletedRoute = null;
+
+        for (var i = 0; i < model.Routes.length; ++i) {
+            var route = model.Routes[i];
+            if (route.Route === routeStr) {
+                // cannot delete the last route in a series
+                if (i === (model.Routes.length - 1)) return false;
+
+                model.Routes.splice(i, 1);
+
+                var tempScrollTop = $(window).scrollTop();
+
+                var htmlRoute = $('#' + trimIllegalIdChars(route.Route));
+
+                htmlRoute.remove();
+                $(window).scrollTop(tempScrollTop);
+
+                indicateLastMovedRow(htmlRoute);
+
+                deletedRoute = route;
+
+                break;
+            }
+        }
+
+        memento.current().undoRoute = selectedRoute;
+        memento.current().lastUndoRoute = deletedRoute;
+        memento.save({ model: model, redoRoute: selectedRoute, lastRedoRoute: deletedRoute });
+        $("#submit-btn").prop('disabled', !hasChanges());
+
+        updateOperTable(selectedRoute, deletedRoute, model);
+    }
+
+    function updateRouteTable(highlightRoute) {
         var markup = '';
+
+        for (var i = 0; i < model.Routes.length; ++i)
+        {
+            var route = model.Routes[i];
+
+            markup += '<tr id="' + trimIllegalIdChars(route.Route) + '" class="route-row">'
+                        + ' <td><a href="#" class="route-link" onclick="javascript:showOpers(\'' + route.Route + '\')">' + route.Route + '</a></td>'
+                        + '<td>' + route.DisplaySequence + '</td>'
+                        + '<td>' + route.SwrRouteVersion + '</td>'
+                        + '<td>' + route.ProductionRouteVersion + '</td>'
+                        + '<td>' + route.Custom + '</td>'
+                        + '<td class="move-arrows">'
+                        + '   <a href="#" class="up" onclick="javascript:moveRouteUp(event, \'' + route.Route + '\')"><i class="fa fa-arrow-up"></i></a> | '
+                        + '   <a href="#" class="down" onclick="javascript:moveRouteDown(event, \'' + route.Route + '\')"><i class="fa fa-arrow-down"></i></a>'
+                        + '</td>';
+                    if (model.IsPending)
+                    {
+                        markup += '<td class="delete">'
+                                + '   <a href="#" onclick="javascript:deleteRoute(event, \'' + route.Route + '\')"><i class="fa fa-trash-o"></i></a>'
+                                + '</td>'
+                    }
+                    markup += '</tr>';
+        }
+
+        $("#routes-tbody").html(markup);
+
+        if (highlightRoute) {
+            var id = trimIllegalIdChars(highlightRoute.Route);
+            var lastMovedRow = $("#" + id);
+            indicateLastMovedRow(lastMovedRow);
+        }
+    }
+
+    function updateOperTable(route, highlightOper, model) {
+        var markup = '';
+        if (model) {
+            route = findRouteInModel(model, route);
+        }
+
         if (route) {
+            selectedRoute = route;
 
             markup += '<table class="full-width">'
                 + '<thead>'
@@ -68,6 +377,7 @@
                 + '       <th>Edc</th>'
                 + '       <th>Flow Control</th>'
                 + '       <th>Move</th>'
+                + '       <th>Delete</th>'
                 + '   </tr>'
                 + '</thead>'
                 + '<tbody id="opers-tbody">';
@@ -75,7 +385,7 @@
             for (var o = 0; o < route.Opers.length; ++o) {
                 var oper = route.Opers[o];
 
-                markup += '<tr id="' + trimIllegalIdChars(route.Route) + '-' + oper.Oper.toString() + '" class="oper-row' + (lastMovedOperNum === oper.Oper ? ' last-moved-row' : '') + '">'
+                markup += '<tr id="' + trimIllegalIdChars(route.Route) + '-' + oper.Oper.toString() + '" class="oper-row' + '">'
                     + '    <td><a href="#" class="oper-link" onclick="javascript:editOper(\'' + route.Route + '\', ' + oper.Oper.toString() + ')">' + oper.Oper.toString() + '</a></td>'
                     + '    <td>' + oper.OperShortDesc + '</td>'
                     + '    <td>' + oper.SpecIns + '</td>'
@@ -84,11 +394,18 @@
                     + '    <td>' + oper.RecipeSplitGroup + '</td>'
                     + '    <td>' + oper.EdcOptions + '</td>'
                     + '    <td>' + oper.FlowControl + '</td>'
-                    + '    <td class="move-arrows">'
-                    + '        <a href="#" class="up" onclick="javascript:moveOperUp(event, \'' + route.Route + '\', ' + oper.Oper.toString() + ')"><i class="fa fa-arrow-up"></i></a> | '
-                    + '        <a href="#" class="down" onclick="javascript:moveOperDown(event, \'' + route.Route + '\', ' + oper.Oper.toString() + ')"><i class="fa fa-arrow-down"></i></a>'
-                    + '    </td>'
-                    + '</tr>'
+                    + '    <td class="move-arrows">';
+                if (oper.Oper !== 101) {
+                    markup += '        <a href="#" class="up" onclick="javascript:moveOperUp(event, \'' + route.Route + '\', ' + oper.Oper.toString() + ')"><i class="fa fa-arrow-up"></i></a> | '
+                            + '        <a href="#" class="down" onclick="javascript:moveOperDown(event, \'' + route.Route + '\', ' + oper.Oper.toString() + ')"><i class="fa fa-arrow-down"></i></a>';
+                }
+                markup += '    </td>'
+                        + '    <td class="delete">';
+                if (oper.Oper !== 101) {
+                    markup += '        <a href="#" onclick="javascript:deleteOper(event, \'' + route.Route + '\', ' + oper.Oper.toString() + ')"><i class="fa fa-trash-o"></i></a>';
+                }
+                markup += '    </td>'
+                        + '</tr>';
             }
 
             markup += '</tbody>'
@@ -97,6 +414,12 @@
 
         $("#opers").show();
         $("#opers").html(markup);
+
+        if (highlightOper && markup) {
+            var id = trimIllegalIdChars(route.Route) + '-' + highlightOper.Oper.toString();
+            var lastMovedRow = $("#" + id);
+            indicateLastMovedRow(lastMovedRow);
+        }
     }
 
     lastMovedRowsContext = {};
@@ -144,7 +467,10 @@
     function moveOperUp(event, routeStr, operNum) {
         event.preventDefault();
 
+        if (operNum === 101) return false;
+
         var didUpdateOperTable = false;
+        var movedOper = null;
 
         for (var i = 0; i < model.Routes.length; ++i) {
             var route = model.Routes[i];
@@ -156,6 +482,9 @@
                         if (o === 0) return false;
 
                         var operToSwap = route.Opers[o - 1];
+
+                        if (operToSwap.Oper === 101) return false;
+
                         route.Opers[o - 1] = oper;
                         route.Opers[o] = operToSwap;
 
@@ -168,6 +497,8 @@
                         $(window).scrollTop(tempScrollTop);
 
                         indicateLastMovedRow(htmlOper);
+
+                        movedOper = oper;
 
                         break;
                     }
@@ -182,12 +513,20 @@
         if (!didUpdateOperTable) {
             $("#opers").hide();
         }
+
+        memento.current().undoRoute = selectedRoute;
+        memento.current().lastUndoOper = movedOper;
+        memento.save({ model: model, redoRoute: selectedRoute, lastRedoOper: movedOper });
+        $("#submit-btn").prop('disabled', !hasChanges());
     }
 
     function moveOperDown(event, routeStr, operNum) {
         event.preventDefault();
 
+        if (operNum === 101) return false;
+
         var didUpdateOperTable = false;
+        var movedOper = null;
 
         for (var i = 0; i < model.Routes.length; ++i) {
             var route = model.Routes[i];
@@ -199,6 +538,9 @@
                         if (o === (route.Opers.length - 1)) return false;
 
                         var operToSwap = route.Opers[o + 1];
+
+                        if (operToSwap.Oper === 101) return false;
+
                         route.Opers[o + 1] = oper;
                         route.Opers[o] = operToSwap;
 
@@ -214,6 +556,8 @@
 
                         indicateLastMovedRow(htmlOper);
 
+                        movedOper = oper;
+
                         break;
                     }
                 }
@@ -227,8 +571,85 @@
         if (!didUpdateOperTable) {
             $("#opers").hide();
         }
+
+        memento.current().undoRoute = selectedRoute;
+        memento.current().lastUndoOper = movedOper;
+        memento.save({ model: model, redoRoute: selectedRoute, lastRedoOper: movedOper });
+        $("#submit-btn").prop('disabled', !hasChanges());
+    }
+
+    function deleteOper(event, routeStr, operNum) {
+        event.preventDefault();
+
+        if (operNum === 101) return false;
+
+        var deletedOper = null;
+
+        for (var i = 0; i < model.Routes.length; ++i) {
+            var route = model.Routes[i];
+            if (route.Route === routeStr) {
+                for (var o = 0; o < route.Opers.length; ++o) {
+                    var oper = route.Opers[o];
+
+                    if (oper.Oper === operNum) {
+                        // remove from the model
+                        route.Opers.splice(o, 1);
+
+                        // preserve scroll
+
+                        var tempScrollTop = $(window).scrollTop();
+
+                        var htmlOper = $('#' + trimIllegalIdChars(route.Route) + '-' + oper.Oper.toString());
+                        htmlOper.remove();
+
+                        $(window).scrollTop(tempScrollTop);
+
+                        indicateLastMovedRow(htmlOper);
+
+                        deletedOper = oper;
+                    }
+                }
+
+                didUpdateOperTable = true;
+
+                break;
+            }
+        }
+
+        if (!didUpdateOperTable) {
+            $("#opers").hide();
+        }
+
+        memento.current().undoRoute = selectedRoute;
+        memento.current().lastUndoOper = deletedOper;
+        memento.save({ model: model, redoRoute: selectedRoute, lastRedoOper: deletedOper });
+        $("#submit-btn").prop('disabled', !hasChanges());
     }
 
     function editOper(routeStr, operNum) {
         alert('Would edit: ' + routeStr + ' / ' + operNum.toString());
     }
+
+    function undo(event) {
+        event.preventDefault();
+        var state = memento.undo();
+
+        if (state) {
+            model = state.model;
+            updateRouteTable(state.lastUndoRoute);
+            updateOperTable(state.undoRoute, state.lastUndoOper, model);
+        }
+    }
+
+    function redo(event) {
+        event.preventDefault();
+        var state = memento.redo();
+
+        if (state) {
+            model = state.model;
+            updateRouteTable(state.lastRedoRoute);
+            updateOperTable(state.redoRoute, state.lastRedoOper, model);
+        }
+    }
+
+</script>
