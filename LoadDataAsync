@@ -1,0 +1,615 @@
+using System;
+using System.Diagnostics;
+using System.Reactive.Disposables;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Documents;
+using System.Windows.Input;
+using BawDataViewer.Core.Mvvm;
+using BawDataViewer.Desktop.Forms.Wpf;
+using ReactiveUI;
+// ReSharper disable PrivateFieldCanBeConvertedToLocalVariable
+// ReSharper disable RedundantBoolCompare
+
+namespace BawDataViewer.Desktop.Forms.UdvConflict
+{
+    public class UdvConflictCheckingViewModel : BindableBase, ICloseWindow
+    {
+        private string _nowProcessingUdvText;
+
+        public string NowProcessingUdvText
+        {
+            get => _nowProcessingUdvText;
+            set => this.RaiseAndSetIfChanged(ref _nowProcessingUdvText, value);
+        }
+
+        private bool _isProcessing;
+
+        public bool IsProcessing
+        {
+            get => _isProcessing;
+            set => this.RaiseAndSetIfChanged(ref _isProcessing, value);
+        }
+
+        private FlowDocument _document;
+
+        public FlowDocument Document
+        {
+            get => _document;
+            set => this.RaiseAndSetIfChanged(ref _document, value);
+        }
+
+        private Paragraph _paragraph;
+
+        public Paragraph Paragraph
+        {
+            get => _paragraph;
+            set => this.RaiseAndSetIfChanged(ref _paragraph, value);
+        }
+
+        private readonly ProcessUdvConflictsAsync _processUdvConflicts;
+
+        private CancellationTokenSource _tokenSource;
+
+        public UdvConflictCheckingViewModel()
+        {
+            _processUdvConflicts = new ProcessUdvConflictsAsync();
+            _processUdvConflicts.WorkPerformed += _processUdvConflicts_WorkPerformed;
+            _nowProcessingUdvText = string.Empty;
+
+            _document = new FlowDocument();
+            _document.Blocks.Add(_paragraph = new Paragraph());
+
+            var canExecuteStart = this.WhenAnyValue(x => x.IsProcessing, (isProcessing) =>
+            {
+                return isProcessing == false;
+            });
+
+            var canExecuteStop = this.WhenAnyValue(x => x.IsProcessing, (isProcessing) =>
+            {
+                return isProcessing == true;
+            });
+
+            StartCommand = ReactiveCommand.Create(() => OnStart(), canExecuteStart).DisposeWith(Disposables.Value);
+            StopCommand = ReactiveCommand.Create(() =>
+            {
+                var userResponse = MessageBox.Show("Are you sure, you want to cancel UDV conflict checking?", "Confirm cancel", MessageBoxButton.YesNo);
+
+
+                if (userResponse == MessageBoxResult.Yes)
+                {
+                    _tokenSource.Cancel();
+                }
+            }, canExecuteStop).DisposeWith(Disposables.Value);
+        }
+
+        private void _processUdvConflicts_WorkPerformed(object sender, WorkPerformedEventArgs e)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                if (e.IsConflict)
+                {
+                    Run item = new Run(e.Data);
+                    Paragraph.Inlines.Add(new Bold(item));
+                }
+                else
+                {
+                    Paragraph.Inlines.Add(e.Data);
+                }
+
+                if (!string.IsNullOrEmpty(e.CurrentlyProcessingUdv))
+                {
+                    NowProcessingUdvText = e.CurrentlyProcessingUdv;
+                }
+
+                Paragraph.Inlines.Add(new LineBreak());
+
+                Document.Blocks.Add(Paragraph);
+            });
+        }
+
+        public ICommand StopCommand { get; }
+
+        public ICommand StartCommand { get; }
+
+        private async Task OnStart()
+        {
+            _tokenSource = new CancellationTokenSource();
+            var token = _tokenSource.Token;
+
+            IsProcessing = true;
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                Paragraph.Inlines.Add($"{DateTime.Now} -  Starting...");
+                Paragraph.Inlines.Add(new LineBreak());
+
+                var result = await _processUdvConflicts.CheckUdvConflictsAsync(token);
+                Paragraph.Inlines.Add(result);
+                Paragraph.Inlines.Add(new LineBreak());
+            }
+            catch (OperationCanceledException canceledException)
+            {
+                Console.WriteLine(canceledException.Message);
+                MessageBox.Show("Cancelled by user");
+            }
+            finally
+            {
+                IsProcessing = false;
+                NowProcessingUdvText = string.Empty;
+                MessageBox.Show("UDV Conflict Checking is complete!");
+                _tokenSource.Dispose();
+                Paragraph.Inlines.Add(@"Total Time spent: " + sw.Elapsed.TotalMinutes);
+            }
+        }
+
+        #region Closing
+        public Action Close { get; set; }
+
+        public bool CanClose()
+        {
+            return true;
+        }
+
+        public void DisposeResources()
+        {
+            _processUdvConflicts.WorkPerformed -= _processUdvConflicts_WorkPerformed;
+            _processUdvConflicts.Dispose();
+        }
+        #endregion
+    }
+}
+
+
+-----------------------------------------------------------------------------------------------------------------
+<controls:MetroWindow   
+    x:Class="BawDataViewer.Desktop.Forms.UdvConflict.UdvConflictCheckingView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+    mc:Ignorable="d" 
+    xmlns:controls="http://metro.mahapps.com/winfx/xaml/controls"
+    BorderBrush="{DynamicResource AccentColorBrush}"
+    xmlns:wpf="clr-namespace:BawDataViewer.Desktop.Forms.Wpf"
+    xmlns:converters="clr-namespace:BawDataViewer.Desktop.Forms.Wpf.Converters"
+    wpf:CloseWindow.EnableWindowClosing="True"
+    BorderThickness="1"
+    ResizeMode="CanResizeWithGrip"
+    WindowStartupLocation="CenterScreen"
+    WindowTransitionsEnabled="True"
+    TitleCharacterCasing="Normal"
+    Title="UDV Conflict Checking" 
+    Height="500"
+    IsCloseButtonEnabled="False"
+    Width="850">
+
+    <controls:MetroWindow.Resources>
+        <ResourceDictionary>
+            <Style TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+                <Setter Property="controls:ButtonHelper.PreserveTextCase" Value="True" />
+            </Style>
+            <converters:BooleanToVisibilityConverter x:Key="BoolToVisConv"/>
+        </ResourceDictionary>
+    </controls:MetroWindow.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" LastChildFill="True" VerticalAlignment="Center" Margin="5">
+            <Button Margin="2" Command="{Binding StartCommand}" Content="Start"  Width="100" />
+            <Separator Margin="2"/>
+            <Button Margin="2" Command="{Binding StopCommand}" Content="Stop"  Width="100" />
+            <Separator Margin="2"/>
+            <TextBlock Text="{Binding NowProcessingUdvText}" Margin="2" />
+        </DockPanel>
+
+        <FlowDocumentScrollViewer Grid.Row="1" Margin="5" Document="{Binding Document, UpdateSourceTrigger=PropertyChanged}"/>
+
+        <DockPanel Grid.Row="2" Dock="Bottom" Margin="5" LastChildFill="True">
+            <ProgressBar Margin="0,3,0,3" Height="40" IsIndeterminate="True" Visibility="{Binding IsProcessing, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BoolToVisConv} }" />
+        </DockPanel>
+
+    </Grid>
+</controls:MetroWindow>
+------------------------------------------------------------------------------------------------------------------------------
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using BawDataViewer.Core.Oracle;
+using BawDataViewer.Core.Utilities;
+namespace BawDataViewer.Desktop.Forms.UdvConflict
+{
+    public class ProcessUdvConflictsAsync : IDisposable
+    {
+        private DataTable _udvVariablesDt;
+        private DataTable _udvAssignmentsByVariableIdDt;
+        private DataTable _otherUdvAssignmentsDt;
+        private DataTable _allProductsDt;
+        private DataTable _allLotsDt;
+        private DataTable _allStatesDt;
+        private DataTable _allRouteOpersDt;
+        private DataTable _allFunctionsDt;
+
+        private DataTable _bawStateRouteOperDt;
+        private DataTable _bawFunctionOrgDt;
+
+        public event EventHandler<WorkPerformedEventArgs> WorkPerformed;
+
+        public ProcessUdvConflictsAsync()
+        {
+        }
+
+        private void LoadData()
+        {
+            _udvVariablesDt = DAL.TQTBAW.ExecuteQuery("SELECT * FROM BAWUDV_VARIABLE ORDER BY VARIABLE_ID");
+
+            //Load All Udv for in-memory processing
+            _allProductsDt = DAL.TQTBAW.ExecuteQuery("SELECT * FROM BAWUDV_GRP_PROD");
+            _allLotsDt = DAL.TQTBAW.ExecuteQuery("SELECT * FROM BAWUDV_GRP_LOT");
+            _allStatesDt = DAL.TQTBAW.ExecuteQuery("SELECT * FROM BAWUDV_GRP_STATE");
+            _allRouteOpersDt = DAL.TQTBAW.ExecuteQuery("SELECT * FROM BAWUDV_GRP_RT_OP");
+            _allFunctionsDt = DAL.TQTBAW.ExecuteQuery("SELECT * FROM BAWUDV_GRP_FUNC");
+            _bawStateRouteOperDt = DAL.TQTBAW.ExecuteQuery("SELECT ST_RT_SAN, ROUTE || '|' || OPER AS ROUTE_OPER FROM BAW_STATE_ROUTE_OPER");
+            _bawFunctionOrgDt = DAL.TQTBAW.ExecuteQuery("SELECT MFD_KEY, CALL_LABEL FROM BAW_FUNCTION_ORG WHERE IS_DELETED = 'N'");
+        }
+
+        public async Task<string> CheckUdvConflictsAsync(CancellationToken token)
+        {
+            LoadData();
+
+            await Task.Run(() =>
+            {
+                int thisAssignmentId;
+                int otherAssignmentId;
+                bool isConflict;
+                var udvVariableCounter = 0;
+
+                foreach (DataRow r in _udvVariablesDt.Rows)
+                {
+                    OnWorkPerformed("", $"Now processing: {r["NAME"]}", false);
+
+                    var counter = 0;
+                    var conflictCounter = 0;
+                    var sql = "SELECT * FROM BAWUDV_ASSIGNMENT WHERE VARIABLE_ID = " + r["VARIABLE_ID"] + " ORDER BY ASSIGNMENT_ID";
+                    _udvAssignmentsByVariableIdDt = DAL.TQTBAW.ExecuteQuery(sql);
+                    _otherUdvAssignmentsDt = DAL.TQTBAW.ExecuteQuery(sql);
+
+                    foreach (DataRow thisAssignmentRow in _udvAssignmentsByVariableIdDt.Rows)
+                    {
+                        thisAssignmentId = Convert.ToInt32(thisAssignmentRow["ASSIGNMENT_ID"]);
+
+                        var thisAssignmentProducts = GetProductsList(thisAssignmentId);
+                        var thisAssignmentLots = GetLotsList(thisAssignmentId);
+                        var thisAssignmentStates = GetStatesList(thisAssignmentId);
+                        var thisAssignmentRouteOper = GetRouteOperList(thisAssignmentId);
+                        var thisAssignmentFunctions = GetFunctionsList(thisAssignmentId);
+
+                        if (token.IsCancellationRequested)
+                        {
+                            token.ThrowIfCancellationRequested();
+                        }
+
+                        foreach (DataRow otherAssignmentRow in _otherUdvAssignmentsDt.Select("ASSIGNMENT_ID <> " + thisAssignmentId))
+                        {
+                            otherAssignmentId = Convert.ToInt32(otherAssignmentRow["ASSIGNMENT_ID"]);
+
+                            var otherAssignmentProducts = GetProductsList(otherAssignmentId);
+                            var otherAssignmentLots = GetLotsList(otherAssignmentId);
+                            var otherAssignmentStates = GetStatesList(otherAssignmentId);
+                            var otherAssignmentRouteOper = GetRouteOperList(otherAssignmentId);
+                            var otherAssignmentFunctions = GetFunctionsList(otherAssignmentId);
+
+                            isConflict = GetConflicts(thisAssignmentProducts, thisAssignmentLots, thisAssignmentStates, thisAssignmentRouteOper, thisAssignmentFunctions,
+                                otherAssignmentProducts, otherAssignmentLots, otherAssignmentStates, otherAssignmentRouteOper, otherAssignmentFunctions);
+
+                            if (isConflict)
+                            {
+                                var conflictMsg = ConflictingAssignmentMsg(thisAssignmentId.ToString(), otherAssignmentId.ToString(), thisAssignmentProducts, thisAssignmentLots, thisAssignmentStates, thisAssignmentRouteOper, thisAssignmentFunctions,
+                                      otherAssignmentProducts, otherAssignmentLots, otherAssignmentStates, otherAssignmentRouteOper, otherAssignmentFunctions);
+
+                                OnWorkPerformed(conflictMsg, "", isConflict);
+                                conflictCounter++;
+                            }
+                        }
+
+                        counter++;
+                    }
+
+                    OnWorkPerformed($"Assignments checked for conflicts: {counter} for UDV: {r["NAME"]} - found ({conflictCounter}) conflicts.", "", false);
+                    OnWorkPerformed($"-------------------------------------------------------------------------------", "", false);
+
+                    udvVariableCounter++;
+                    if (udvVariableCounter == 5)
+                    {
+                        break;
+                    }
+                }
+            });
+            return $"{DateTime.Now} - Complete!";
+        }
+
+        public bool GetConflicts(List<string> thisProd, List<string> thisLot, List<string> thisState, List<string> thisRtOper, List<string> thisFunc,
+                  List<string> otherProd, List<string> otherLot, List<string> otherState, List<string> otherRtOper, List<string> otherFunc)
+        {
+            bool conflict = false;
+
+            //Compare Products
+            foreach (var thisP in thisProd)
+            {
+                foreach (var otherP in otherProd)
+                {
+                    if (thisP == otherP)
+                    {
+                        conflict = true;
+                    }
+                }
+            }
+
+            if (conflict == false)
+            {
+                return false;
+            }
+
+            conflict = false;
+
+            //Compare for lots
+            foreach (var thisL in thisLot)
+            {
+                foreach (var otherL in otherLot)
+                {
+                    if (thisL == otherL)
+                    {
+                        conflict = true;
+                    }
+                }
+            }
+
+            if (conflict == false)
+            {
+                return false;
+            }
+
+            conflict = false;
+
+            //Compare States
+            foreach (var thisS in thisState)
+            {
+                foreach (var otherS in otherState)
+                {
+                    if (thisS == otherS)
+                    {
+                        conflict = true;
+                    }
+                }
+            }
+
+            if (conflict == false)
+            {
+                return false;
+            }
+
+            conflict = false;
+
+            //Compare Routes/Opers
+            foreach (var thisRte in thisRtOper)
+            {
+                foreach (var otherRte in otherRtOper)
+                {
+                    if (thisRte == otherRte)
+                    {
+                        conflict = true;
+                    }
+                }
+            }
+
+            if (conflict == false)
+            {
+                return false;
+            }
+
+            conflict = false;
+
+            //Compare Functions
+            foreach (var thisF in thisFunc)
+            {
+                foreach (var otherF in otherFunc)
+                {
+                    if (thisF == otherF)
+                    {
+                        conflict = true;
+                    }
+                }
+            }
+
+            if (conflict == false)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        public string ConflictingAssignmentMsg(string thisAssignmentId, string otherAssignmentId, List<string> thisProducts, List<string> thisLots, List<string> thisStates, List<string> thisRouteOper, List<string> thisFunctions,
+                                       List<string> otherProducts, List<string> otherLots, List<string> otherStates, List<string> otherRouteOper, List<string> otherFunctions)
+        {
+            var thisProdMsg = string.Join(",", thisProducts);
+            var thisLotMsg = string.Join(",", thisLots);
+            var thisStateMsg = string.Join(",", thisStates);
+            var thisRteOperMsg = string.Empty;
+            var thisFuncMsg = string.Empty;
+
+            if (thisRouteOper.Contains("*"))
+            {
+                thisRteOperMsg = "*";
+            }
+            else
+            {
+                foreach (var str in thisRouteOper)
+                {
+                    thisRteOperMsg += _bawStateRouteOperDt.Select("ST_RT_SAN  = " + str)[0]["ROUTE_OPER"] + ", ";
+                }
+
+                thisRteOperMsg = HelperTools.RemoveLastIndex(thisRteOperMsg, ',');
+            }
+
+            if (thisFunctions.Contains("*"))
+            {
+                thisFuncMsg = "*";
+            }
+            else
+            {
+                foreach (var str in thisFunctions)
+                {
+                    thisFuncMsg += _bawFunctionOrgDt.Select("MFD_KEY = " + str)[0]["CALL_LABEL"] + ", ";
+                }
+
+                thisFuncMsg = HelperTools.RemoveLastIndex(thisFuncMsg, ',');
+            }
+
+            //Get Others!
+            var otherProdMsg = string.Join(",", otherProducts);
+            var otherLotMsg = string.Join(",", otherLots);
+            var otherStateMsg = string.Join(",", otherStates);
+            string otherRteOperMsg = string.Empty;
+            string otherFuncMsg = string.Empty;
+
+            if (otherRouteOper.Contains("*"))
+            {
+                otherRteOperMsg = "*";
+            }
+            else
+            {
+                foreach (var str in otherRouteOper)
+                {
+                    otherRteOperMsg += _bawStateRouteOperDt.Select("ST_RT_SAN  = " + str)[0]["ROUTE_OPER"] + ", ";
+                }
+
+                otherRteOperMsg = HelperTools.RemoveLastIndex(otherRteOperMsg, ',');
+            }
+
+            if (otherFunctions.Contains("*"))
+            {
+                otherFuncMsg = "*";
+            }
+            else
+            {
+                foreach (var str in otherFunctions)
+                {
+                    otherFuncMsg += _bawFunctionOrgDt.Select("MFD_KEY = " + str)[0]["CALL_LABEL"] + ", ";
+                }
+
+                otherFuncMsg = HelperTools.RemoveLastIndex(otherFuncMsg, ',');
+            }
+
+            return
+
+                $"Assignment: {thisAssignmentId}\nProducts: {thisProdMsg}\nLot: {thisLotMsg}\nState: {thisStateMsg}\nRteOper: {thisRteOperMsg}\nFunc: {thisFuncMsg}\n\n" +
+                "will have conflict with:\n\n" +
+                $"AssignmentID: {otherAssignmentId}\nProducts: {otherProdMsg}\nLot: {otherLotMsg}\nState: {otherStateMsg}\nRteOper: {otherRteOperMsg}\nFunc: {otherFuncMsg}\n" +
+                "********************************************************************************************************";
+        }
+        private void OnWorkPerformed(string data, string udvName, bool isConflict)
+        {
+            WorkPerformed?.Invoke(this, new WorkPerformedEventArgs(data, udvName, isConflict));
+        }
+
+        #region Assignments' Contents
+
+        public List<string> GetProductsList(int assignmentId)
+        {
+            return _allProductsDt.Select("ASSIGNMENT_ID = " + assignmentId).Select(p => p.Field<string>("PRODUCT")).ToList();
+        }
+
+        public List<string> GetLotsList(int assignmentId)
+        {
+            return _allLotsDt.Select("ASSIGNMENT_ID = " + assignmentId).Select(l => l.Field<string>("LOT")).ToList();
+        }
+
+        public List<string> GetStatesList(int assignmentId)
+        {
+            return _allStatesDt.Select("ASSIGNMENT_ID = " + assignmentId).Select(s => s.Field<string>("STATE")).ToList();
+        }
+
+        public List<string> GetRouteOperList(int assignmentId)
+        {
+            var retVal = new List<string>();
+
+            foreach (var row in _allRouteOpersDt.Select("ASSIGNMENT_ID = " + assignmentId))
+            {
+                if (row["ST_RT_SAN"] == DBNull.Value || row["ST_RT_SAN"] == null)
+                {
+                    retVal.Add("*");
+                }
+                else
+                {
+                    retVal.Add(row["ST_RT_SAN"].ToString());
+                }
+            }
+
+            return retVal;
+        }
+
+        public List<string> GetFunctionsList(int assignmentId)
+        {
+            var retVal = new List<string>();
+
+            foreach (var row in _allFunctionsDt.Select("ASSIGNMENT_ID = " + assignmentId))
+            {
+                if (row["MFD_KEY"] == DBNull.Value || row["MFD_KEY"] == null)
+                {
+                    retVal.Add("*");
+                }
+                else
+                {
+                    retVal.Add(row["MFD_KEY"].ToString());
+                }
+            }
+
+            return retVal;
+        }
+
+        #endregion Assignments Contents
+
+        public void Dispose()
+        {
+            _udvVariablesDt.Dispose();
+            _udvAssignmentsByVariableIdDt.Dispose();
+            _otherUdvAssignmentsDt.Dispose();
+            _allProductsDt.Dispose();
+            _allLotsDt.Dispose();
+            _allStatesDt.Dispose();
+            _allRouteOpersDt.Dispose();
+            _allFunctionsDt.Dispose();
+            _bawStateRouteOperDt.Dispose();
+            _bawFunctionOrgDt.Dispose();
+        }
+    }
+
+    public class WorkPerformedEventArgs : EventArgs
+    {
+        public WorkPerformedEventArgs(string data, string currentlyProcessingUdv, bool isConflict)
+        {
+            Data = data;
+            CurrentlyProcessingUdv = currentlyProcessingUdv;
+            IsConflict = isConflict;
+        }
+
+        public string Data { get; }
+
+        public string CurrentlyProcessingUdv { get; }
+
+        public bool IsConflict { get; }
+    }
+}
+----------------------------------------------------------------------------------------------------------------------------------
+
+
