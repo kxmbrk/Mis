@@ -1,3 +1,798 @@
+function BuilderViewModel(args) {
+    var self = this;
+
+
+    // properties
+    self.utils = new SwrOctaneUtils(args.basePath);
+    self.swrId = args.swrId;
+    self.facility = args.facility;
+    self.prodType = args.prodType;
+    self.submitBtn = $(args.submitBtn);
+    self.editOpersDialog = $(args.editOpersDialog);
+    self.isInitialized = ko.observable(false);
+    self.products = ko.observableArray(args.products);
+    self.swrStatus = ko.observable(args.swrStatus);
+    self.flowType = ko.observable(args.flowType);
+
+    self.model = { routes: ko.observableArray() };
+    self.originalModel = { routes: ko.observableArray() };
+
+    self.selectedRoute = ko.observable();
+    self.selectedOper = ko.observable();
+
+    self.getBase64 = function (file, onsuccess) {
+        var reader = new FileReader();
+        reader.onload = function () {
+            onsuccess(reader.result);
+        };
+        reader.onerror = function (error) {
+            console.log('Error: ', error);
+        };
+
+        reader.readAsDataURL(file);
+    }
+
+    self.edit = {
+        oper: ko.observable(new BuilderOper()),
+        products: ko.observableArray(args.products),
+
+        route: ko.observable(),
+        operNum: ko.observable(),
+        shortDesc: ko.observable(),
+        operType: ko.observable(),
+
+        futureHoldCategoryData: ko.observableArray(),
+        futureHoldOwners: ko.observableArray(),
+
+        selectedSpecId: ko.observable(),
+        selectedWaferSetId: ko.observable(),
+
+        selectedWaferSetGroups: ko.observableArray(),
+        hasMultipleProduct: ko.observable(),
+        hasAllProducts: ko.observable(),
+        
+        uploadDocumentation: function(file) {
+            self.getBase64(file,
+                function (base64) {
+                    var index = base64.indexOf(',') + 1;
+                    base64 = base64.substr(index);
+                    self.edit.oper().selectedDocumentationFile(base64);
+                });
+        },
+
+        clearRecipeParameters: function(recipe) {
+            for (var i = 0; i < recipe.RecipeParameters().length; ++i) {
+                var p = recipe.RecipeParameters()[i];
+                p.ParameterValue(null);
+            }
+        },
+
+        calcRecipeParameters: function(recipe) {
+            for (var i = 0; i < recipe.RecipeParameters().length; ++i) {
+                var p = recipe.RecipeParameters()[i];
+                p.ParameterValue(p.ParameterValueOriginal());
+            }
+        },
+
+        chooseTool: function(toolId, isChecked) {
+            if (isChecked) {
+                // add to selection if not already present
+                var exists = self.edit.oper().selectedTools().find(function(t) {
+                    return t === toolId;
+                });
+
+                if (!exists) {
+                    self.edit.oper().selectedTools.push(toolId);
+                }
+            } else {
+                // remove from selectedTools
+                self.edit.oper().selectedTools.remove(function(t) {
+                    return t === toolId;
+                });
+            }
+        },
+
+        addRecipes: function() {
+            if (self.edit.oper().selectedRecipe && self.edit.oper().selectedTools()) {
+
+                var route = self.edit.route();
+                var oper = self.edit.oper().oper();
+                var waferSetId = self.edit.selectedWaferSetId();
+                var selectedTools = self.edit.oper().selectedTools();
+                var facility = self.facility;
+                var operDesc = self.edit.oper().shortDesc();
+                var product = self.edit.oper().selectedProduct();
+                var unselectedTools = [];
+                var operType = self.edit.oper().operType();
+                var selectedWaferSetGroups = ko.mapping.toJS(self.edit.selectedWaferSetGroups());
+                var selectedRecipeMain = self.edit.oper().selectedRecipe();
+
+                var selectedToolObjects = [];
+                for (var t = 0; t < self.edit.oper().allTools().length; t++) {
+                    var tool = self.edit.oper().allTools()[t];
+
+                    if (!selectedTools.includes(tool.ToolId())) {
+                        unselectedTools.push({
+                            ToolId: tool.ToolId(),
+                            ToolSet: tool.ToolSet()
+                        });
+                    } else {
+                        selectedToolObjects.push({
+                            ToolId: tool.ToolId(),
+                            ToolSet: tool.ToolSet()
+                        });
+                    }
+                }
+
+                var validateToolsObject = JSON.stringify({
+                    SwrId: self.swrId,
+                    Route: route,
+                    Operation: oper,
+                    WaferSetId: waferSetId,
+                    SelectedTools: selectedToolObjects,
+                    UnselectedTools: unselectedTools, 
+                    Facility: facility, 
+                    OperDescription: operDesc,
+                    Product: product,
+                    OperType: operType,
+                    SelectedWaferSetGroups: selectedWaferSetGroups,
+                    SelectedRecipeMain: selectedRecipeMain
+                });
+
+                $.ajax({
+                    url: self.utils.getAction("OctaneBuilder/ValidateAndAddToolsMaxWaferGroups"),
+                    cache: false,
+                    dataType: "json",
+                    type: "POST",
+                    contentType: 'application/json',
+                    data: validateToolsObject,
+                    success: function (data) {
+                        if (data.isSucceed) {
+
+                            if (data.recipeInfoData) {
+                                self.buildRecipeInfo(self.edit.oper(), data.recipeInfoData);
+                            }
+                            toastr["info"]('Recipe(s) added', 'Info');
+
+                        } else {
+                            toastr["error"](data.message, 'Error');
+                        }
+                    },
+                    error: function (response) {
+                        alert("error: " + response);
+                    }
+                });
+                
+            }
+        },
+
+        deleteRecipes: function() {
+            if (self.edit.oper().recipeInfoData != null && self.edit.oper().recipeInfoData().length > 0) {
+
+                self.edit.oper().recipeInfoData.removeAll();
+            }
+        },
+
+        persistOper: function () {
+            var oper = self.findOperInRoute(self.selectedRoute(), self.edit.oper().oper()).Oper;
+
+            if (oper) {
+                oper.updateFromEdit(self.edit.oper());
+
+                oper.specId(self.edit.selectedSpecId());
+                oper.assignedWaferSetId(self.edit.selectedWaferSetId());
+                oper.selectedDocumentationFile(self.edit.oper().selectedDocumentationFile());
+                oper.selectedWaferSetGroups(self.edit.selectedWaferSetGroups());
+
+                //self.detectChanges();
+
+                self.saveOperations(oper);
+            }
+        }
+    };
+
+    self.saveOperations = function(oper) {
+
+        var modelToSave = JSON.stringify(oper.fromKnockoutDeepCopy(false));
+
+        $.ajax({
+            url: self.utils.getAction("OctaneBuilder/SaveOneOperation"),
+            cache: false,
+            dataType: "json",
+            type: "POST",
+            contentType: 'application/json',
+            data: modelToSave,
+            success: function (data) {
+                if (data.isSucceed) {
+
+                    toastr["info"]('saved successfully.', 'Info');
+                    self.detectChanges();
+
+                } else {
+                    toastr["error"](data.message, 'Error');
+                }
+            },
+            error: function (response) {
+                alert("error: " + response);
+            }
+        });
+    };
+
+    self.edit.selectedWaferSetId.subscribe(function (newValue) {
+        if (!newValue) {
+            self.edit.selectedWaferSetGroups([]);
+            return;
+        }
+
+        $.ajax({
+            url: self.utils.getAction("OctaneBuilder/LoadSplitMergeWaferList")
+                + "?swrId=" + encodeURIComponent(self.swrId)
+                + "&route=" + encodeURIComponent(self.selectedRoute().route())
+                + "&oper=" + encodeURIComponent(self.selectedOper().oper())
+                + "&waferGroupSetId=" + encodeURIComponent(newValue),
+            cache: false,
+            dataType: "json",
+            type: "GET",
+            traditional: true,
+            success: function (data) {
+                var groups = ko.mapping.fromJS(data)();
+                for (var i = 0; i < groups.length; ++i) {
+                    var g = groups[i];
+                    g.selectedRelation = ko.observable("");
+                    g.selectedRecipe = ko.observable();
+                    g.selectedAction = ko.observable();
+                }
+
+                self.edit.selectedWaferSetGroups(groups);
+            },
+            error: function (response) {
+                alert("error: " + response);
+            }
+        });
+
+        self.loadRecipes(newValue);
+    });
+
+    var currentRecipeLoad = 0;
+    self.loadRecipes = function (waferSetId) {
+        var selectedTools = self.edit.oper().selectedTools();
+
+        var myRecipeLoad = currentRecipeLoad++;
+        $.ajax({
+            url: self.utils.getAction("OctaneBuilder/LoadRecipes"),
+            cache: false,
+            data: JSON.stringify({
+                swrId: self.swrId,
+                route: self.selectedRoute().route(),
+                oper: self.selectedOper().oper(),
+                waferGroupSetId: (waferSetId || self.edit.selectedWaferSetId()),
+                selectedTools: selectedTools
+            }),
+            contentType: 'application/json',
+            dataType: "json",
+            type: "POST",
+            traditional: true,
+            success: function (data) {
+                // only store the latest pending recipe list
+                if ((currentRecipeLoad - 1) === myRecipeLoad) {
+                    var recipes = ko.mapping.fromJS(data)();
+                    recipes.splice(0, 0, 'Choose Recipe...');
+                    self.edit.oper().recipes(recipes);
+                }
+            },
+            error: function (response) {
+                alert("error: " + response);
+            }
+        });
+    };
+
+
+    self.isReadOnly = ko.computed(function() {
+        return self.swrStatus() !== 'Pending' ? 'readonly' : undefined;
+    });
+
+
+    // methods
+    self.findRouteInModel = function (routeStr) {
+        if (!routeStr) return null;
+        for (var i = 0; i < self.model.routes().length; ++i) {
+            var route = self.model.routes()[i];
+            if (route.route() === routeStr) {
+                return { Route: route, Index: i };
+            }
+        }
+        return {};
+    }
+
+    self.findOperInRoute = function (route, operNum) {
+        if (!route) return null;
+        for (var i = 0; i < route.opers().length; ++i) {
+            var oper = route.opers()[i];
+            if (oper.oper() === operNum) {
+                return { Route: route, Oper: oper, Index: i };
+            }
+        }
+        return {};
+    }
+
+    self.selectRoute = function (route) {
+
+        //Check the custom flag of the selected route
+        var customFlagVal = route.custom();
+
+        if (customFlagVal === "S" || customFlagVal === "N") {
+            //force user to save, if there were unsaved changes!
+            self.forceSave(function () {
+
+                self.rdoCustomizeOrSkipRoute(customFlagVal);
+
+                //show dialog to user to choose what to do.
+                $('#customize-or-skip-route-dialog').modal('show');
+
+            });
+        }
+
+        self.selectedRoute(route);
+    }
+
+    // #region Add/Delete EDC Option Product
+    self.addEdcOptionProduct = function() {
+        var product = self.edit.oper().edcOptionProduct();
+        var optionType = self.edit.oper().edcOptionType();
+        var facility = self.facility;
+        var productType = self.prodType;
+        var waferGroupSetId = self.edit.oper().selectedEdcOptionWaferSetId();
+
+        //product must not be empty or null
+        if (product === null || product === undefined || product.length === 0 || product === "") {
+            toastr["error"]('Product must not be empty!', 'Error');
+            return false;
+        }
+
+        //Check and see if selected product was already in the list
+        var isProductAlreadyExist = false;
+        for (var i = 0; i < self.edit.oper().edcLimits().length; i++) {
+            var item = self.edit.oper().edcLimits()[i];
+            if (item !== null && item !== undefined) {
+                for (var j = 0; j < item.length; j++) {
+                    var item2 = item[j];
+                    if (item2.Product() === product) {
+                        isProductAlreadyExist = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (isProductAlreadyExist) {
+            toastr["error"]('Product {' + product + '} already exist!', 'Error');
+            return false;
+        }
+
+        if (product != "ALL") {
+            //Check the length of the product entered!
+            if (product.length != 9) {
+                toastr["error"]('Invalid Product entered: ' + product, 'Error');
+                return false;
+            }
+
+            //Check and see if selected product is a valid product. e.g., EG-M01234
+            var regex = /(^[EG\-M0]{5}[0-9]{4})/;
+            var result = regex.test(product);
+
+            if (!result) {
+                toastr["error"]('Invalid Product entered: ' + product, 'Error');
+                return false;
+            }
+        }
+
+        $.ajax({
+            url: self.utils.getAction("OctaneBuilder/AddEdcProduct"),
+            cache: false,
+            data: { facility: facility, productType: productType, edcOptionType: optionType, swrId: self.swrId, route: self.edit.oper().route(), oper: self.edit.oper().oper(), product: product, waferGroupSetId: waferGroupSetId },
+            dataType: "json",
+            type: "POST",
+            success: function (data) {
+                if (data.success) {
+                    toastr["info"]('success.', 'Info');
+                    self.UpdateEdcOptions(optionType);
+                    self.edit.oper().edcOptionProduct(undefined);
+                } else {
+                    toastr["error"](data.message, 'Error');
+                }
+            },
+            error: function (response) {
+                toastr["error"](response, 'Error');
+            }
+        });
+    };
+
+    self.deleteEdcOptionProduct = function() {
+
+        var product = self.edit.oper().edcOptionProduct();
+        var optionType = self.edit.oper().edcOptionType();
+
+        //product must not be empty or null
+        if (product === null || product === undefined || product.length === 0 || product === "") {
+            toastr["error"]('Product must not be empty!', 'Error');
+            return false;
+        }
+
+        if (product != "ALL") {
+            //Check the length of the product entered!
+            if (product.length != 9) {
+                toastr["error"]('Invalid Product entered: ' + product, 'Error');
+                return false;
+            }
+
+            //Check and see if selected product is a valid product. e.g., EG-M01234
+            var regex = /(^[EG\-M0]{5}[0-9]{4})/;
+            var result = regex.test(product);
+
+            if (!result) {
+                toastr["error"]('Invalid Product entered: ' + product, 'Error');
+                return false;
+            }
+
+            //make sure that the product exists
+            var isProductAlreadyExist = false;
+            for (var i = 0; i < self.edit.oper().edcLimits().length; i++) {
+                var item = self.edit.oper().edcLimits()[i];
+                if (item !== null && item !== undefined) {
+                    for (var j = 0; j < item.length; j++) {
+                        var item2 = item[j];
+                        if (item2.Product() === product) {
+                            isProductAlreadyExist = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!isProductAlreadyExist) {
+                toastr["error"]('Product {' + product + '} does not exist!', 'Error');
+                return false;
+            }
+        }
+
+        $.ajax({
+            url: self.utils.getAction("OctaneBuilder/DeleteEdcProduct"),
+            cache: false,
+            data: { swrId: self.swrId, route: self.edit.oper().route(), oper: self.edit.oper().oper(), product: product },
+            dataType: "json",
+            type: "POST",
+            success: function (data) {
+                if (data.success) {
+                    toastr["info"]('success.', 'Info');
+                    self.UpdateEdcOptions(optionType);
+                    self.edit.oper().edcOptionProduct(undefined);
+                } else {
+                    toastr["error"](data.message, 'Error');
+                }
+            },
+            error: function (response) {
+                toastr["error"](response, 'Error');
+            }
+        });
+    };
+
+    // #endregion
+
+    self.selectOper = function (oper, showEditDialog) {
+
+        self.selectedOper(oper);
+
+        if (showEditDialog) {
+
+            self.forceSave(function() {
+                self.editOper(oper);
+            });
+        }
+    }
+
+    self.editOper = function (oper) {
+        var route = self.selectedRoute();
+        if (!route || !oper) return false;
+        var edcOptions = "NONE";
+        if (oper.edcOptions() !== null || oper.edcOptions() !== undefined) {
+            edcOptions = oper.edcOptions();
+        }
+
+        $.ajax({
+            url: self.utils.getAction("OctaneBuilder/LoadEditOperData") +
+                "?swrId=" +
+                encodeURIComponent(self.swrId) +
+                "&route=" +
+                encodeURIComponent(route.route()) +
+                "&oper=" +
+                encodeURIComponent(oper.oper()) +
+                "&facility=" +
+                encodeURIComponent(self.facility) +
+                "&prodType=" +
+                encodeURIComponent(self.prodType) +
+                "&operShortDesc=" +
+                encodeURIComponent(oper.shortDesc()) + 
+                "&edcOptions=" +
+                encodeURIComponent(edcOptions),
+            cache: false,
+            dataType: "json",
+            type: "GET",
+            traditional: true,
+            success: function (data) {
+                oper.probeSetup(ko.mapping.fromJS(data.Probesetup)());
+                oper.probeSetupLots(ko.mapping.fromJS(data.ProbeSetupLots)());
+                oper.allTools(ko.mapping.fromJS(data.AllTools)());
+                oper.distinctToolSets(ko.mapping.fromJS(data.DistinctToolSets)());
+
+                // add empty first entry
+                oper.distinctToolSets.splice(0, 0, "");
+
+                oper.allowedToolIds(ko.mapping.fromJS(data.AllowedToolIds)());
+                oper.specs(ko.mapping.fromJS(data.Specs)());
+                oper.operType(ko.mapping.fromJS(data.OperType)());
+
+                self.buildRecipeInfo(oper, data.RecipeInfoData);
+
+                self.edit.futureHoldCategoryData(ko.mapping.fromJS(data.FutureHoldCategoryData)());
+
+                var waferSetGroups = ko.mapping.fromJS(data.WaferSetGroups)();
+                waferSetGroups.splice(0, 0, { SetId: ko.observable(-1), SetLabel: ko.observable('None') });
+                oper.waferSetGroups(waferSetGroups);
+
+                oper.assignedWaferSetId(ko.mapping.fromJS(data.AssignedWaferSetId)());
+
+                if (self.edit.oper() && self.edit.operSelectedToolsSubscription) {
+                    self.edit.operSelectedToolsSubscription.dispose();
+                }
+                if (self.edit.oper() && self.edit.operFutureHoldCategorySubscription) {
+                    self.edit.operFutureHoldCategorySubscription.dispose();
+                }
+                if (self.edit.oper() && self.edit.operEdcOptionTypeSubscription) {
+                    self.edit.operEdcOptionTypeSubscription.dispose();
+                }
+
+                if (self.edit.oper() && self.edit.selectedEdcOptionWaferSetIdSubscription) {
+                    self.edit.selectedEdcOptionWaferSetIdSubscription.dispose();
+                }
+
+                oper.etsFutureHoldData(ko.mapping.fromJS(data.EtsFutureHoldData)());
+
+                if (oper.etsFutureHoldData().length > 0) {
+                    oper.etsFutureHold("1");
+                    oper.futureHoldNote(oper.etsFutureHoldData()[0].HoldNote());
+                    oper.futureHoldCategory(oper.etsFutureHoldData()[0].HoldCategory());
+                    oper.futureHoldOwner(oper.etsFutureHoldData()[0].HoldOwner());
+                    oper.futureHoldDetails(oper.etsFutureHoldData()[0].HoldDetail());
+                }
+
+                oper.fileName(data.FileName);
+                self.edit.futureHoldOwners(ko.mapping.fromJS(data.EtsHoldOwner)());
+
+                oper.displayEdcOptions(data.DisplayEdcOptions);
+
+                self.edit.hasMultipleProduct(data.HasMultipleProduct);
+                self.edit.hasAllProducts(data.HasAllProducts);
+
+                //------------------------------
+                var editOper = new BuilderOper(oper, args.products);
+
+                self.edit.oper(editOper);
+                editOper.copyForEdit(oper);
+
+                for (var i = 0; i < self.edit.oper().recipeInfoData().length; i++) {
+                    var r = self.edit.oper().recipeInfoData()[i];
+                    var operDrrm = self.edit.oper();
+
+                    if (r.Drrm) {
+                        r.Drrm.subscribe(function (newValue) {
+                            operDrrm.lotLevelDrrmSuspendSubscription = true;
+                            if (!newValue) {
+                                operDrrm.lotLevelDrrm(false);
+                            } else {
+                                var isChecked = true;
+                                for (var k = 0; k < operDrrm.recipeInfoData().length; k++) {
+                                    var item = operDrrm.recipeInfoData()[k];
+                                    if (!item.Drrm()) {
+                                        isChecked = false;
+                                        break;
+                                    }
+                                }
+                                operDrrm.lotLevelDrrm(isChecked);
+                            }
+
+                            operDrrm.lotLevelDrrmSuspendSubscription = false;
+                        });
+                    }
+
+                }
+
+                self.edit.operSelectedToolsSubscription = self.edit.oper().selectedTools.subscribe(function(newValue) {
+                    self.loadRecipes();
+                });
+
+                self.edit.operFutureHoldCategorySubscription = self.edit.oper().futureHoldCategory.subscribe(
+                    function(newValue) {
+                        self.loadHoldOwners(newValue);
+                    });
+
+                //gets the waferSetId from waferSetGroups by passing in the value
+                var waferSetId = self.edit.oper().waferSetGroups().filter(function(x) {
+                    return x.SetLabel() === data.EdcSelectedSplitGroup;
+                }).map(function(x) {
+                    return x.SetId();
+                })[0];
+
+                self.edit.route(self.selectedRoute().route());
+                self.edit.operNum(oper.oper());
+                self.edit.shortDesc(oper.shortDesc());
+                self.edit.operType(oper.operType());
+
+                self.edit.oper().selectedDocumentationFile(null);
+                $('#image-or-documentation').val(null);
+
+                self.edit.selectedSpecId(oper.specId());
+                self.edit.selectedWaferSetId(oper.assignedWaferSetId() || -1);
+
+                self.loadRecipes();
+
+                if (self.edit.oper().displayEdcOptions) {
+                    if (!self.edit.oper().edcOptionType()) { //not set
+                        self.edit.oper().edcOptionType(data.EdcOptionType);
+                    } else {
+                        var temp = self.edit.oper().edcOptionType();
+                        self.edit.oper().edcOptionType(null);
+                        self.edit.oper().edcOptionType(temp);
+                    }
+                }
+
+                self.edit.oper().selectedEdcOptionWaferSetId(waferSetId);
+
+                self.edit.operEdcOptionTypeSubscription = self.edit.oper().edcOptionType.subscribe(
+                    function (newValue) {
+                        if (newValue) {
+                            self.UpdateEdcOptions(newValue);
+                        }
+                    });
+
+                self.edit.selectedEdcOptionWaferSetIdSubscription = self.edit.oper().selectedEdcOptionWaferSetId
+                    .subscribe(
+                        function (newValue) {
+                            self.UpdateEdcOptions(self.edit.oper().edcOptionType());
+                        });
+
+                self.UpdateEdcOptions(self.edit.oper().edcOptionType());
+
+                self.editOpersDialog.modal('show');
+            },
+            error: function(response) {
+                alert("error: " + response);
+            }
+        });
+    };
+
+    self.UpdateEdcOptions = function(optionType) {
+
+        var selectedTools = self.edit.oper().selectedTools().map(function(x) {
+            return x;
+        });
+
+        var unselectedTools = self.edit.oper().allTools().filter(function(x) {
+            return !selectedTools.includes(x.ToolId());
+        }).map(function(y) {
+            return y.ToolId();
+        });
+
+        var facility = self.facility;
+        var productType = self.prodType;
+        var waferGroupSetId = self.edit.oper().selectedEdcOptionWaferSetId();
+
+
+        $.ajax({
+            url: self.utils.getAction("OctaneBuilder/UpdateEdcOptions"),
+            cache: false,
+            data: { facility: facility, productType: productType, edcOptionType: optionType, selectedTools: selectedTools, unselectedTools: unselectedTools, swrId: self.swrId, route: self.edit.oper().route(), oper: self.edit.oper().oper(), waferGroupSetId: waferGroupSetId},
+            dataType: "json",
+            type: "POST",
+            success: function(data) {
+                if (data.success) {
+                    self.edit.oper().edcLimits(ko.mapping.fromJS(data.edcLimits)());
+                } else {
+                    toastr["error"](data.message, 'Error');
+                }
+            },
+            error: function (response) {
+                alert("error: " + response);
+            }
+        });
+    };
+
+    self.edcLimitOptionsVisibility = ko.computed(function() {
+        if (self.edit.oper().edcOptionType() === 'Custom' && self.edit.oper().selectedEdcOptionWaferSetId()) {
+            return true;
+        } else {
+            return false;
+        }
+    });
+
+    self.buildRecipeInfo = function(oper, recipeInfoData) {
+
+        oper.recipeInfoData(ko.mapping.fromJS(recipeInfoData)());
+        for (var i = 0; i < oper.recipeInfoData().length; ++i) {
+            var r = oper.recipeInfoData()[i];
+            r.Plink = ko.observable(self.utils.getAction(
+                    "../TXMES/SWRBuilder/RecipeEntry.aspx?swr=" + encodeURIComponent(self.swrId)
+                    + "&facility=" + encodeURIComponent(self.facility)
+                    + "&prod=" + encodeURIComponent(r.Product())
+                    + "&route=" + encodeURIComponent(self.selectedRoute().route())
+                    + "&oper=" + encodeURIComponent(self.selectedOper().oper())
+                    + "&tool=" + encodeURIComponent(r.ToolId())
+                    + "&recipe=" + encodeURIComponent(r.Recipe())
+                    + "&wafer_group_id=" + encodeURIComponent((r.WaferGroupId && r.WaferGroupId()) || ""))
+            );
+
+            for (var j = 0; j < r.RecipeParameters().length; ++j) {
+                var p = r.RecipeParameters()[j];
+                p.ParameterValueOriginal = ko.observable(p.ParameterValue());
+            }
+        }
+
+    };
+
+    self.extendedRecipeColumnNames = ko.computed(function() {
+        if (self.edit.oper() && self.edit.oper().recipeInfoData().length > 0) {
+            return self.edit.oper().recipeInfoData()[0].RecipeParameters().map(function(x) {
+                return {name: x.ParameterName};
+            });
+        }
+    });
+
+    self.loadHoldOwners = function (holdCategory) {
+        $.ajax({
+            url: self.utils.getAction("OctaneBuilder/LoadEtsHoldOwners")
+                + "?holdCategory=" + encodeURIComponent(holdCategory),
+            cache: false,
+            dataType: "json",
+            type: "GET",
+            traditional: true,
+            success: function (data) {
+                var owners = ko.mapping.fromJS(data)();
+                self.edit.futureHoldOwners(owners);
+            },
+            error: function (response) {
+                alert("error: " + response);
+            }
+        });
+    }
+
+    self.activeRoutes = ko.computed(function () {
+        if (self.isInitialized()) {
+            return ko.utils.arrayFilter(self.model.routes(), function (x) {
+                return !x.isDeleted();
+            }).sort(function (x, y) {
+                return x.seq() < y.seq() ? -1
+                    : x.seq() > y.seq() ? 1
+                        : 0;
+            });
+        }
+        else {
+            return [];
+        }
+    });
+
+    self.activeOpers = ko.computed(function () {
+        if (self.selectedRoute() && self.isInitialized()) {
+            return ko.utils.arrayFilter(self.selectedRoute().opers(), function (x) {
+                return !x.isDeleted() && self.selectedRoute().custom() === "Y";
+            }).sort(function (x, y) {
+                return x.seq() < y.seq() ? -1
+                    : x.seq() > y.seq() ? 1
+                        : 0;
+            });
+        } else {
+            return [];
+        }
+    });
+
     var lastMovedRowsContext = {};
 
     self.indicateLastMovedRow = function (lastMoved, routeStr) {
@@ -33,3 +828,1413 @@
             }, 3000);
         }, 2000);
     }
+
+
+    self.deleteRoute = function (route) {
+        route.isDeleted(true);
+
+        //delete all operations in this Route
+        for (var i = 0; i < route.opers().length; ++i) {
+            var oper = route.opers()[i];
+            oper.isDeleted(true);
+        }
+
+        self.assignRouteSequenceNumbers();
+
+        //self.memento.save({
+        //    model: fromKnockoutRoutes(self.model.routes),
+        //    redo: { route: self.selectedRoute() && self.selectedRoute().fromKnockout(), lastActedRoute: route.fromKnockout() },
+        //    undo: { route: self.selectedRoute() && self.selectedRoute().fromKnockout(), lastActedRoute: route.fromKnockout() }
+        //});
+
+        self.detectChanges();
+    }
+
+    self.moveRouteUp = function (route) {
+        var result = self.findRouteInModel(route.route());
+        var i = result.Index;
+
+        if (i > 0) {
+            var routeToSwap = self.model.routes()[i - 1];
+
+            self.model.routes()[i - 1] = route;
+            self.model.routes()[i] = routeToSwap;
+
+            var temp = route.seq();
+            route.seq(routeToSwap.seq());
+            route.isModified(true);
+
+            routeToSwap.seq(temp);
+            routeToSwap.isModified(true);
+
+            //self.memento.save({
+            //    model: fromKnockoutRoutes(self.model.routes),
+            //    redo: { route: self.selectedRoute() && self.selectedRoute().fromKnockout(), lastActedRoute: route.fromKnockout() },
+            //    undo: { route: self.selectedRoute() && self.selectedRoute().fromKnockout(), lastActedRoute: route.fromKnockout() }
+            //});
+
+            self.indicateLastMovedRow(route);
+            self.detectChanges();
+        }
+    }
+
+    self.moveRouteDown = function (route) {
+        var result = self.findRouteInModel(route.route());
+        var i = result.Index;
+
+        if (i < self.model.routes().length - 1) {
+            var routeToSwap = self.model.routes()[i + 1];
+
+            self.model.routes()[i + 1] = route;
+            self.model.routes()[i] = routeToSwap;
+
+            var temp = route.seq();
+            route.seq(routeToSwap.seq());
+            route.isModified(true);
+
+            routeToSwap.seq(temp);
+            routeToSwap.isModified(true);
+
+            //self.memento.save({
+            //    model: fromKnockoutRoutes(self.model.routes),
+            //    redo: { route: self.selectedRoute() && self.selectedRoute().fromKnockout(), lastActedRoute: route.fromKnockout() },
+            //    undo: { route: self.selectedRoute() && self.selectedRoute().fromKnockout(), lastActedRoute: route.fromKnockout() }
+            //});
+
+            self.indicateLastMovedRow(route);
+            self.detectChanges();
+        }
+    }
+
+    self.deleteOper = function (oper) {
+        oper.isDeleted(true);
+        self.selectedRoute().isModified(true);
+        self.assignOperSequenceNumbers(self.selectedRoute());
+
+        //self.memento.save({
+        //    model: fromKnockoutRoutes(self.model.routes),
+        //    redo: { route: self.selectedRoute() && self.selectedRoute().fromKnockout(), lastActedOper: oper.fromKnockout() },
+        //    undo: { route: self.selectedRoute() && self.selectedRoute().fromKnockout(), lastActedOper: oper.fromKnockout() }
+        //});
+
+        self.detectChanges();
+    }
+
+    self.moveOperUp = function (oper) {
+
+        var result = self.findOperInRoute(self.selectedRoute(), oper.oper());
+        var i = result.Index;
+
+        if (i > 0) {
+            var operToSwap = self.selectedRoute().opers()[i - 1];
+
+            self.selectedRoute().opers()[i - 1] = oper;
+            self.selectedRoute().opers()[i] = operToSwap;
+
+            var temp = oper.seq();
+            oper.seq(operToSwap.seq());
+            oper.isModified(true);
+
+            operToSwap.seq(temp);
+            operToSwap.isModified(true);
+
+            //self.memento.save({
+            //    model: fromKnockoutRoutes(self.model.routes),
+            //    redo: { route: self.selectedRoute() && self.selectedRoute().fromKnockout(), lastActedOper: oper.fromKnockout() },
+            //    undo: { route: self.selectedRoute() && self.selectedRoute().fromKnockout(), lastActedOper: oper.fromKnockout() }
+            //});
+
+            self.selectedRoute().isModified(true);
+
+            self.indicateLastMovedRow(oper, self.selectedRoute().route());
+            self.detectChanges();
+        }
+    }
+
+    self.moveOperDown = function (oper) {
+
+        var result = self.findOperInRoute(self.selectedRoute(), oper.oper());
+        var i = result.Index;
+
+        if (i < self.selectedRoute().opers().length - 1) {
+            var operToSwap = self.selectedRoute().opers()[i + 1];
+
+            self.selectedRoute().opers()[i + 1] = oper;
+            self.selectedRoute().opers()[i] = operToSwap;
+
+            var temp = oper.seq();
+            oper.seq(operToSwap.seq());
+            oper.isModified(true);
+
+            operToSwap.seq(temp);
+            operToSwap.isModified(true);
+
+            //self.memento.save({
+            //    model: fromKnockoutRoutes(self.model.routes),
+            //    redo: { route: self.selectedRoute() && self.selectedRoute().fromKnockout(), lastActedOper: oper.fromKnockout() },
+            //    undo: { route: self.selectedRoute() && self.selectedRoute().fromKnockout(), lastActedOper: oper.fromKnockout() }
+            //});
+
+            self.selectedRoute().isModified(true);
+
+            self.indicateLastMovedRow(oper, self.selectedRoute().route());
+            self.detectChanges();
+        }
+    }
+
+    self.undo = function () {
+        var state = self.memento.undo();
+
+        if (state) {
+            self.model.routes(toKnockoutRoutes(state.model));
+
+            var ctx = state.undo;
+            var routeStr = '';
+            if (ctx.route) {
+                var result = self.findRouteInModel(ctx.route.route);
+                if (result.Route) {
+                    routeStr = result.Route.route();
+                    self.selectedRoute(result.Route);
+                }
+                else {
+                    self.selectedRoute(null);
+                }
+            }
+            else {
+                self.selectedRoute(null);
+            }
+
+            if (ctx.lastActedRoute) {
+                var result = self.findRouteInModel(ctx.lastActedRoute.route);
+                if (result.Route) {
+                    self.indicateLastMovedRow(result.Route, routeStr);
+                }
+            }
+            else if (ctx.lastActedOper) {
+                var result = self.findOperInRoute(self.selectedRoute(), ctx.lastActedOper.oper);
+                if (result.Oper) {
+                    self.indicateLastMovedRow(result.Oper, routeStr);
+                }
+            }
+
+            self.detectChanges();
+        }
+    }
+
+    self.redo = function() {
+        var state = self.memento.redo();
+
+        if (state) {
+            self.model.routes(toKnockoutRoutes(state.model));
+
+            var ctx = state.redo;
+            var routeStr = '';
+            if (ctx.route) {
+                var result = self.findRouteInModel(ctx.route.route);
+                if (result.Route) {
+                    routeStr = result.Route.route();
+                    self.selectedRoute(result.Route);
+                }
+                else {
+                    self.selectedRoute(null);
+                }
+            }
+            else {
+                self.selectedRoute(null);
+            }
+
+            if (ctx.lastActedRoute) {
+                var result = self.findRouteInModel(ctx.lastActedRoute.route);
+                if (result.Route) {
+                    self.indicateLastMovedRow(result.Route, routeStr);
+                }
+            }
+            else if (ctx.lastActedOper) {
+                var result = self.findOperInRoute(self.selectedRoute(), ctx.lastActedOper.oper);
+                if (result.Oper) {
+                    self.indicateLastMovedRow(result.Oper, routeStr);
+                }
+            }
+
+            self.detectChanges();
+        }
+    }
+
+    self.assignRouteSequenceNumbers = function () {
+        var index = 1;
+        for (var i = 0; i < self.model.routes().length; ++i) {
+            var route = self.model.routes()[i];
+
+            if (!route.isDeleted()) {
+                if (route.seq() !== index) {
+                    route.seq(index);
+                    route.isModified(true);
+                }
+                index++;
+            }
+        }
+    }
+
+    self.assignOperSequenceNumbers = function (route) {
+        var index = 1;
+        for (var i = 0; i < route.opers().length; ++i) {
+            var oper = route.opers()[i];
+
+            if (!oper.isDeleted()) {
+                if (oper.seq() !== index) {
+                    oper.seq(index);
+                    oper.isModified(true);
+                }
+                index++;
+            } 
+        }
+    }
+
+    self.detectChanges = function () {
+        var routes = fromKnockoutRoutes(self.model.routes, false);
+        var originalRoutes = fromKnockoutRoutes(self.originalModel.routes, false);
+
+       return self.utils.updateSubmitButton(self.submitBtn, routes, originalRoutes);
+    }
+
+    self.forceSave = function(callBack) {
+
+        if (self.detectChanges()) {
+            self.afterSaveCallBack = callBack;
+            $('#force-save-changes-dialog').modal('show');
+        } else {
+            if (callBack) {
+                callBack();
+            }
+        }
+    };
+
+    self.saveChanges = function(invokeCallBack) {
+
+        if (invokeCallBack && self.afterSaveCallBack) {
+            $('#force-save-changes-dialog').modal('hide');
+        }
+
+        var modelToSave = JSON.stringify(fromKnockoutRoutes(self.model.routes, false));
+
+        $.ajax({
+            url: self.utils.getAction("OctaneBuilder/SaveChanges"),
+            cache: false,
+            dataType: "json",
+            type: "POST",
+            contentType: 'application/json',
+            data: modelToSave,
+            success: function(data) {
+                if (data.isSucceed) {
+
+                    if (data.recipeInfo) {
+                        self.buildRecipeInfo(self.edit.oper(), data.recipeInfo);
+                    }
+
+                    self.originalModel.routes(toKnockoutRoutes(fromKnockoutRoutes(self.model.routes)));
+
+                    self.detectChanges();
+
+                    toastr["info"]('saved successfully.', 'Info');
+                    if (invokeCallBack) {
+                        self.afterSaveCallBack();
+                    }
+
+                } else {
+                    toastr["error"](data.message, 'Error');
+                }
+            },
+            error: function(response) {
+                alert("error: " + response);
+            }
+        });
+    };
+
+    self.cancelClicked = function () {
+        var routes = fromKnockoutRoutes(self.model.routes, true);
+        var originalRoutes = fromKnockoutRoutes(self.originalModel.routes, true);
+
+        if (self.utils.hasChanges(routes, originalRoutes)) {
+            self.showLeavePageDialog(self.utils.getAction("OctaneMaster/Index"));
+        }
+        else {
+            window.location.href = self.utils.getAction("OctaneMaster/Index");
+        }
+    }
+
+    self.submitIfChanged = function () {
+        var routes = fromKnockoutRoutes(self.model.routes, false);
+        var originalRoutes = fromKnockoutRoutes(self.originalModel.routes, false);
+
+        if (self.utils.hasChanges(routes, originalRoutes)) {
+            self.saveChanges(false);
+        }
+        else {
+            toastr["info"]('Would not submit as no changes were detected!', 'Info');
+        }
+    }
+
+    self.manageWaferGroups = function () {
+        var redirectUrl = encodeURIComponent(self.utils.getAction("OctaneBuilder/Builder?swrId=" + encodeURIComponent(self.swrId)));
+        var navigateToUrl = self.utils.getAction("OctaneSplitGroups/Manage"
+            + "?swrId=" + encodeURIComponent(self.swrId)
+            + '&redirectUrl=' + redirectUrl);
+
+        var routes = fromKnockoutRoutes(self.model.routes, true);
+        var originalRoutes = fromKnockoutRoutes(self.originalModel.routes, true);
+
+        if (self.utils.hasChanges(routes, originalRoutes)) {
+            self.showLeavePageDialog(navigateToUrl);
+        }
+        else {
+            window.location.href = navigateToUrl;
+        }
+    }
+
+    self.showLeavePageDialog = function (navigateToUrl) {
+        $("#leave-page-navigate-to-url").val(navigateToUrl);
+        $("#leave-page-dialog").modal('show');
+    }
+
+    self.navigateAway = function () {
+        var navigateToUrl = $("#leave-page-navigate-to-url").val();
+        window.location.href = navigateToUrl;
+    }
+
+    self.displayfile = function () {
+        var url = self.utils.getAction("OctaneBuilder/GetSwrFileData") +
+            "?swrId=" + encodeURIComponent(self.swrId) +
+            "&route=" + encodeURIComponent(self.selectedRoute().route()) +
+            "&oper=" + encodeURIComponent(self.edit.oper().oper()) +
+            "&fileName=" + encodeURIComponent(self.edit.oper().fileName());
+
+        window.open(url, "_blank");
+    }
+
+    // #region Add Route stuff
+    self.addRouteCopyCreate = ko.observable();
+    self.addRouteSwrReleasedEngr = ko.observable();
+    self.addRouteSingleMultiple = ko.observable();
+    self.addRouteSwrMultipleSelectedRoute = ko.observableArray([]);
+    self.selectedInsertPoint = ko.observable();
+    self.routesList = ko.observableArray();
+    self.swrOriginatorList = ko.observableArray();
+    self.selectedOriginator = ko.observable();
+    self.allSwrList = ko.observableArray();
+    self.selectedSwrId = ko.observable();
+
+    self.addRouteReleasedFacilityList = ko.observableArray();
+    self.addRouteReleasedSelectedFacility = ko.observable();
+
+    self.addRouteReleasedRouteList = ko.observableArray();
+    self.addRouteReleasedSelectedRoute = ko.observable();
+
+    self.addRouteEngrFacilityList = ko.observableArray();
+    self.addRouteEngrSelectedFacility = ko.observable();
+
+    self.addRouteEngrRouteList = ko.observableArray();
+    self.addRouteEngrSelectedRoute = ko.observable();
+
+    self.addRoutSwrRouteList = ko.observableArray();
+    self.addRouteSwrSelectedRoute = ko.observable();
+
+    self.addRouteRouteName = ko.observable();
+    self.addRouteRouteDescription = ko.observable();
+    self.addRouteRoutePurpose = ko.observable();
+
+    //On Copy/Create selections => clear all variables
+    self.addRouteCopyCreate.subscribe(function() {
+        self.resetAddNewRouteVariables();
+        self.addRouteRouteName(undefined);
+        self.addRouteRouteDescription(undefined);
+        self.addRouteRoutePurpose(undefined);
+    });
+
+    self.addRouteSingleMultiple.subscribe(function (newValue) {
+        self.addRouteSwrSelectedRoute(null);
+        self.addRouteSwrMultipleSelectedRoute([]);
+        self.addRouteRouteName(undefined);
+        self.addRouteRouteDescription(undefined);
+        self.addRouteRoutePurpose(undefined);
+    });
+
+    //Drs (Released Route selected)
+    self.addRouteReleasedSelectedRoute.subscribe(function(newValue) {
+        if (newValue) {
+            var routeDesc = "";
+
+            for (var i = 0; i < self.addRouteReleasedRouteList().length; i++) {
+                var item = self.addRouteReleasedRouteList()[i];
+                if (item.Route() === newValue) {
+                    routeDesc = item.Description();
+                    break;
+                }
+            }
+            self.addRouteRouteName(newValue);
+            self.addRouteRouteDescription(routeDesc);
+        }
+    });
+
+    //Engr (Engineering Route selected)
+    self.addRouteEngrSelectedRoute.subscribe(function (newValue) {
+        if (newValue) {
+            var routeDesc = "";
+
+            for (var i = 0; i < self.addRouteEngrRouteList().length; i++) {
+                var item = self.addRouteEngrRouteList()[i];
+                if (item.Route() === newValue) {
+                    routeDesc = item.Description();
+                    break;
+                }
+            }
+            self.addRouteRouteName(newValue);
+            self.addRouteRouteDescription(routeDesc);
+        }
+    });
+
+    //SWR (SWR-Single Route selected)
+    self.addRouteSwrSelectedRoute.subscribe(function (newValue) {
+        if (newValue) {
+            var routeDesc = "";
+
+            for (var i = 0; i < self.addRoutSwrRouteList().length; i++) {
+                var item = self.addRoutSwrRouteList()[i];
+                if (item.Route() === newValue) {
+                    routeDesc = item.Description();
+                    break;
+                }
+            }
+            self.addRouteRouteName(newValue);
+            self.addRouteRouteDescription(routeDesc);
+        }
+    });
+
+    //SWR (SWR-Multiple Route selected) - no need to populate Route/Description
+    self.addRouteSwrMultipleSelectedRoute.subscribe(function (newValue) {
+        self.addRouteRouteName(undefined);
+        self.addRouteRouteDescription(undefined);
+    });
+
+    self.resetAddNewRouteVariables = function () {
+        self.swrOriginatorList(undefined);
+        self.allSwrList(undefined);
+        self.addRouteReleasedFacilityList(undefined);
+        self.addRouteReleasedSelectedFacility(undefined);
+        self.addRouteEngrFacilityList(undefined);
+        self.addRouteEngrSelectedFacility(undefined);
+        self.addRouteReleasedRouteList(undefined);
+        self.addRouteReleasedSelectedRoute(undefined);
+        self.addRouteEngrRouteList(undefined);
+        self.addRouteEngrSelectedRoute(undefined);
+        self.addRoutSwrRouteList(undefined);
+        self.addRouteSwrSelectedRoute(undefined);
+        self.addRouteSwrMultipleSelectedRoute([]);
+        self.addRouteRouteName(undefined);
+        self.addRouteRouteDescription(undefined);
+        self.addRouteRoutePurpose(undefined);
+        //self.addRouteSwrMultipleSelectAllRoutes(undefined);
+    }
+
+    self.addRouteSwrReleasedEngr.subscribe(function (newValue) {
+
+        self.resetAddNewRouteVariables();
+
+        var facilityList = [];
+        facilityList.push('Wafer Fab | GAASMW');
+        facilityList.push('Pkg Part Test | GAASTE');
+        facilityList.push('AMMA | GAASMA');
+        facilityList.push('Material Growth | GAASMT');
+
+        if (newValue === 'SWR') {
+            //make ajax call to load Swr-initiator drop-down
+            $.ajax({
+                url: self.utils.getAction("OctaneBuilder/GetSwrInitiators"),
+                cache: false,
+                dataType: "json",
+                type: "GET",
+                contentType: 'application/json',
+                success: function (data) {
+                    if (data) {
+                        self.swrOriginatorList(ko.mapping.fromJS(data)());
+                    } else {
+                        toastr["error"](data.message, 'Error');
+                    }
+                },
+                error: function (response) {
+                    alert("error: " + response);
+                }
+            });
+        } else if (newValue === 'Released') {
+            self.addRouteReleasedFacilityList(facilityList.map(function (x) {
+                return x;
+            }));
+        } else if (newValue === 'Engr') {
+            self.addRouteEngrFacilityList(facilityList.map(function (x) {
+                return x;
+            }));
+        }
+    });
+
+    //whenever originator changes, load swrIds for the selected Originator (drop-down)
+    self.selectedOriginator.subscribe(function() {
+
+        var userId = self.selectedOriginator();
+        if (userId) {
+            $.ajax({
+                url: self.utils.getAction("OctaneBuilder/GetSwrInitiatorsWithSwrIds"),
+                cache: false,
+                dataType: "json",
+                type: "GET",
+                contentType: 'application/json',
+                data: { originatorUserId: userId },
+                success: function (data) {
+                    if (data) {
+                        self.allSwrList(ko.mapping.fromJS(data)());
+                    } else {
+                        toastr["error"](data.message, 'Error');
+                    }
+                },
+                error: function (response) {
+                    alert("error: " + response);
+                }
+            });
+        } else {
+            self.allSwrList([]);
+        }
+    });
+
+    //whenever ReleasedSelectedFacility changes, load Drs Routes
+    self.addRouteReleasedSelectedFacility.subscribe(function(newValue) {
+        if (newValue != null && newValue.length > 0) {
+            var facilityVal = self.addRouteReleasedSelectedFacility();
+            var selectedFacility = facilityVal.split('|')[1].trim();
+            if (selectedFacility) {
+                $.ajax({
+                    url: self.utils.getAction("OctaneBuilder/GetDrsRoutes"),
+                    cache: false,
+                    dataType: "json",
+                    type: "GET",
+                    contentType: 'application/json',
+                    data: { facility: selectedFacility },
+                    success: function (data) {
+                        if (data) {
+                            self.addRouteReleasedRouteList(ko.mapping.fromJS(data)());
+                        } else {
+                            toastr["error"](data.message, 'Error');
+                        }
+                    },
+                    error: function (response) {
+                        alert("error: " + response);
+                    }
+                });
+            }
+        }
+    });
+
+    //whenever EngineeringSelectedFacility changes, load Routes
+    self.addRouteEngrSelectedFacility.subscribe(function(newValue) {
+        if (newValue != null && newValue.length > 0) {
+            var facilityVal = self.addRouteEngrSelectedFacility();
+            var selectedFacility = facilityVal.split('|')[1].trim();
+            if (selectedFacility) {
+                $.ajax({
+                    url: self.utils.getAction("OctaneBuilder/GetEngineeringRoutes"),
+                    cache: false,
+                    dataType: "json",
+                    type: "GET",
+                    contentType: 'application/json',
+                    data: { facility: selectedFacility },
+                    success: function (data) {
+                        if (data) {
+                            self.addRouteEngrRouteList(ko.mapping.fromJS(data)());
+                        } else {
+                            toastr["error"](data.message, 'Error');
+                        }
+                    },
+                    error: function (response) {
+                        alert("error: " + response);
+                    }
+                });
+            }
+        }
+    });
+
+    //whenever, user selects SWR from the drop-down, load routes for the selected swrId
+    self.selectedSwrId.subscribe(function (newValue) {
+        var swrId = self.selectedSwrId();
+        if (swrId) {
+            $.ajax({
+                url: self.utils.getAction("OctaneBuilder/GetRoutesForSwr"),
+                cache: false,
+                dataType: "json",
+                type: "GET",
+                contentType: 'application/json',
+                data: { swrId: swrId },
+                success: function (data) {
+                    if (data) {
+                        self.addRoutSwrRouteList(ko.mapping.fromJS(data)());
+                    } else {
+                        toastr["error"](data.message, 'Error');
+                    }
+                },
+                error: function (response) {
+                    alert("error: " + response);
+                }
+            });
+        } else {
+            self.addRoutSwrRouteList([]);
+        }
+    });
+
+    self.ShowAddRouteDialog = function () {
+
+        self.forceSave(function () {
+            self.addRouteCopyCreate(undefined);
+            self.addRouteSwrReleasedEngr(undefined);
+            self.addRouteSingleMultiple(undefined);
+            self.addRouteSwrMultipleSelectedRoute([]);
+            self.selectedInsertPoint(undefined);
+
+            self.resetAddNewRouteVariables();
+
+            //Populate routes for add new route dialog (insert after - dropDown)
+            self.routesList([]);
+            $.each(self.model.routes(), function (i, r) {
+                if (!r.isDeleted()) {
+                    self.routesList.push(r.route());
+                }
+            });
+
+            $('#add-route-dialog').modal('show');
+        });
+    }
+
+    self.AddNewRoute = function () {
+
+        //force user to save, if there were unsaved changes!
+        self.forceSave(function () {
+
+            var action = self.addRouteCopyCreate();
+            if (action == null || action.length === 0) {
+                alert('Please specify Copy/Create new!');
+                return false;
+            }
+
+            var routeName = self.addRouteRouteName();
+            var routeDescription = self.addRouteRouteDescription();
+            var routePurpose = self.addRouteRoutePurpose();
+            var insertPoint = self.selectedInsertPoint();
+            var swrReleasedEngr = "";
+            var selectedFacility = "";
+            var copyFromSwrId = "";
+            var copyFromRoute = [];
+            var thisSwrId = model.SwrId;
+            var validateRouteAndDesc = false;
+
+            if (action === "CreateNew") {
+                validateRouteAndDesc = true;
+            }
+
+            if (action === 'Copy') {
+
+                swrReleasedEngr = self.addRouteSwrReleasedEngr();
+
+                if (swrReleasedEngr == null || swrReleasedEngr.length == 0) {
+                    alert('Please specify copy from - SWR/Released or Engineering');
+                    return false;
+                }
+
+                if (swrReleasedEngr == 'Released') {
+                    selectedFacility = self.addRouteReleasedSelectedFacility();
+                    if (selectedFacility == null || selectedFacility.length == 0) {
+                        alert('Please specify Facility');
+                        return false;
+                    }
+
+                    selectedFacility = selectedFacility.split('|')[1].trim();
+                    if (self.addRouteReleasedSelectedRoute() == null) {
+                        alert('Please specify Route to copy from');
+                        return false;
+                    }
+
+                    copyFromRoute.push(self.addRouteReleasedSelectedRoute());
+
+                    validateRouteAndDesc = true;
+
+                } else if (swrReleasedEngr == 'Engr') {
+                    selectedFacility = self.addRouteEngrSelectedFacility();
+                    if (selectedFacility == null || selectedFacility.length == 0) {
+                        alert('Please specify Facility');
+                        return false;
+                    }
+
+                    selectedFacility = selectedFacility.split('|')[1].trim();
+                    if (self.addRouteEngrSelectedRoute() == null) {
+                        alert('Please specify Route to copy from');
+                        return false;
+                    }
+
+                    copyFromRoute.push(self.addRouteEngrSelectedRoute());
+
+                    validateRouteAndDesc = true;
+
+                } else if (swrReleasedEngr === 'SWR') {
+
+                    if (self.addRouteSingleMultiple() === undefined || self.addRouteSingleMultiple() === null || self.addRouteSingleMultiple().length === 0) {
+                        alert('Please select Single or Multiple');
+                        return false;
+                    }
+
+                    copyFromSwrId = self.selectedSwrId();
+                    if (copyFromSwrId == null || copyFromSwrId.length == 0) {
+                        alert('Please select SWR-ID to copy from.');
+                        return false;
+                    }
+
+                    if (self.addRouteSingleMultiple() === 'Single') {
+
+                        if (self.addRouteSwrSelectedRoute() == null) {
+                            alert('Please specify Route to copy from');
+                            return false;
+                        }
+
+                        copyFromRoute.push(self.addRouteSwrSelectedRoute());
+
+                        validateRouteAndDesc = true;
+
+                    } else if (self.addRouteSingleMultiple() === 'Multiple') {
+
+                        if (self.addRouteSwrMultipleSelectedRoute() == null) {
+                            alert('Please specify Route to copy from');
+                            return false;
+                        }
+
+                        for (var i = 0; i < self.addRouteSwrMultipleSelectedRoute().length; i++) {
+                            var route = self.addRouteSwrMultipleSelectedRoute()[i];
+                            copyFromRoute.push(route);
+                        }
+
+                        if (copyFromRoute.length === 1) {
+                            alert('You have only selected 1 route for Multiple Routes option.');
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            if (validateRouteAndDesc) {
+                if (routeName == undefined || routeName == null || routeName.length == 0) {
+                    alert('Route name is required!');
+                    return false;
+                }
+
+                if (routeName.length > 10) {
+                    alert('Route name must be less than or equal to 10 characters.');
+                    return false;
+                }
+
+                //Now make sure that the route doesn't exist in the current SWR!
+                for (var i = 0; i < self.routesList().length; i++) {
+                    if (routeName === self.routesList()[i]) {
+                        alert('Route {' + routeName + '} already exist in the current SWR!');
+                        return false;
+                    }
+                }
+
+                if (routeDescription != null) {
+                    if (routeDescription.length > 35) {
+                        alert('Route description must be less than or equal to 35 characters.');
+                        return false;
+                    }
+                }
+            }
+
+            $.ajax({
+                url: self.utils.getAction("OctaneBuilder/AddNewRoute"),
+                cache: false,
+                dataType: "json",
+                type: "POST",
+                contentType: 'application/json',
+                data: JSON.stringify({ swrId: thisSwrId, action: action, copyFromActionType: swrReleasedEngr, routeName: routeName, routeDesc: routeDescription, routePurpose: routePurpose, selectedFacility: selectedFacility, copyFromSwrId: copyFromSwrId, copyFromRoute: copyFromRoute, insertPoint: insertPoint }),
+                success: function (data) {
+                    if (data.isSucceed) {
+                        toastr["info"]('Route added successfully.', 'Info');
+                        //reload the same page...
+                        window.location.reload();
+                    } else {
+                        toastr["error"](data.message, 'Error');
+                    }
+                },
+                error: function (response) {
+                    alert("error: " + response);
+                }
+            });
+        });
+
+        return true;
+    }
+
+    self.getFormattedErrMessages = function (validationErrs) {
+        var msg = "";
+        for (var i = 0; i < validationErrs.length; i++) {
+            msg += validationErrs[i] + "\n";
+        }
+
+        return msg;
+    }
+
+    self.addRouteSwrMultipleSelectAllRoutes = ko.computed({
+        read: function () {
+            if (self.addRoutSwrRouteList() && self.addRoutSwrRouteList()) {
+                return self.addRoutSwrRouteList().length > 0 && self.addRoutSwrRouteList().length == self.addRouteSwrMultipleSelectedRoute().length;
+            }
+        },
+        write: function (value) {
+            if (value) {
+                self.addRouteSwrMultipleSelectedRoute.removeAll();
+                for (var i = 0; i < self.addRoutSwrRouteList().length; i++) {
+                    var item = self.addRoutSwrRouteList()[i].Route();
+                    self.addRouteSwrMultipleSelectedRoute.push(item);
+                }
+            } else {
+                self.addRouteSwrMultipleSelectedRoute.removeAll();
+            }
+        },
+        owner: self
+    });
+
+
+    // #endregion
+
+    // #region Add Operation stuff
+
+    //properties for add oper
+    self.addOperProductTypeList = ko.observableArray([]);
+    self.addOperSelectedProductType = ko.observable("");
+    self.addOperProcessTypeList = ko.observableArray([]);
+    self.addOperSelectedProcessType = ko.observable("");
+    self.addOperOperationList = ko.observableArray([]);
+    self.addOperSelectedOperation = ko.observable("");
+    self.addOperDescription = ko.observable("");
+    self.addOperOperationInsertPointList = ko.observableArray([]);
+    self.addOperSelectedInsertPoint = ko.observable("");
+    self.addOperMvinHold = ko.observable(false);
+    self.addOperMvinSplit = ko.observable(false);
+    self.addOperMvinMerge = ko.observable(false);
+    self.addOperMvinIns = ko.observable("");
+    self.addOperMvoutHold = ko.observable(false);
+    self.addOperMvoutSplit = ko.observable(false);
+    self.addOperMvoutMerge = ko.observable(false);
+    self.addOperMvoutIns = ko.observable("");
+    self.addOperSpecIdList = ko.observableArray([]);
+    self.addOperSelectedSpecId = ko.observable("");
+    self.addOperSelectAllTools = ko.observable(false);
+    self.addOperSelectAllowedTools = ko.observable(false);
+    self.addOperAllTools = ko.observableArray([]);
+    self.addOperAllowedTools = ko.observableArray([]);
+    self.addOperSelectedTools = ko.observableArray([]);
+    self.addOperSpecIdTextValue = ko.observable("");
+
+    self.ShowAddOperDialog = function () {
+
+        self.forceSave(function () {
+
+            self.resetAddOperationVariables();
+
+            //Populate ProductTypes
+            self.addOperProductTypeList(['BAW', 'GaAs/GaN', 'AMMA', 'Packaged Part']);
+
+            //populate ProcessTypes
+            self.addOperProcessTypeList(['AOI', 'ASH', 'BACK_END', 'CLEAN_UP', 'CMP', 'CVD', 'DC_PROBE', 'ETCH', 'INSPECT', 'LITHOGRAPHY', 'MATLAB', 'METAL', 'METROLOGY', 'OTHER', 'PROBE_FINAL', 'PROBE_TRIM', 'TRIM']);
+
+            //Populate current operations of the selected route for add new operation dialog (insert after - dropDown)
+            if (self.selectedRoute() && self.activeOpers()) {
+                $.each(self.activeOpers(), function (i, o) {
+                    var operToAdd = "After " + o.oper() + " " + o.shortDesc();
+                    self.addOperOperationInsertPointList.push(operToAdd);
+                });
+            }
+
+            //select BAW by default
+            self.addOperSelectedProductType('BAW'); 
+
+            $('#add-operation-dialog').modal('show');
+        });
+    }
+
+    self.resetAddOperationVariables = function () {
+        self.addOperProductTypeList([]);
+        self.addOperSelectedProductType("");
+        self.addOperProcessTypeList([]);
+        self.addOperSelectedProcessType("");
+        self.addOperOperationList([]);
+        self.addOperSelectedOperation("");
+        self.addOperDescription("");
+        self.addOperOperationInsertPointList([]);
+        self.addOperSelectedInsertPoint("");
+        self.addOperMvinHold(false);
+        self.addOperMvinSplit(false);
+        self.addOperMvinMerge(false);
+        self.addOperMvinIns("");
+        self.addOperMvoutHold(false);
+        self.addOperMvoutSplit(false);
+        self.addOperMvoutMerge(false);
+        self.addOperMvoutIns("");
+        self.addOperSpecIdList([]);
+        self.addOperSelectedSpecId("");
+        self.addOperSelectAllTools(false);
+        self.addOperSelectAllowedTools(false);
+        self.addOperAllTools([]);
+        self.addOperAllowedTools([]);
+        self.addOperSelectedTools([]);
+        self.addOperSpecIdTextValue("");
+    }
+
+    //when processType changes reload operations
+    self.addOperSelectedProductType.subscribe(function (newValue) {
+        if (newValue !== undefined && newValue !== "" && newValue.length > 0) {
+
+            if (newValue !== 'BAW') {
+                self.addOperSelectedProcessType("");
+            }
+
+            self.loadAddOperOperations();
+        }
+    });
+
+    self.loadAddOperOperations = function () {
+
+        $.ajax({
+            url: self.utils.getAction("OctaneBuilder/GetAddOperOperations"),
+            cache: false,
+            dataType: "json",
+            type: "GET",
+            contentType: 'application/json',
+            data: { facility: self.facility, prodType: self.addOperSelectedProductType(), processType: self.addOperSelectedProcessType() },
+            success: function (data) {
+                if (data.isSucceed) {
+                    self.addOperOperationList([]);
+                    for (var i = 0; i < data.opers.length; i++) {
+                        self.addOperOperationList.push(data.opers[i]);
+                    }
+                } else {
+                    toastr["error"](data.message, 'Error');
+                }
+            },
+            error: function (response) {
+                alert("error: " + response);
+            }
+        });
+    }
+
+    //Whenever selection changes in the selected operation, display its description
+    //load allowed tools and specIds
+    self.addOperSelectedOperation.subscribe(function (newValue) {
+        if (newValue === undefined || newValue === "" && newValue.length === 0) {
+            self.addOperDescription("");
+            return false;
+        }
+
+        //display description
+        var item = ko.utils.arrayFilter(self.addOperOperationList(), function (x) {
+            if (x.OperDesc === newValue.OperDesc) {
+                return x;
+            }
+        });
+
+        if (item[0].ShortDesc === null || item[0].ShortDesc === undefined || item[0].ShortDesc.length === 0) {
+            self.addOperDescription("");
+        } else {
+            self.addOperDescription(item[0].ShortDesc);
+        }
+
+        self.addOperSpecIdList([]);
+        self.addOperSelectedSpecId("");
+        self.addOperAllowedTools([]);
+        self.addOperSelectedTools([]);
+        self.addOperAllTools([]);
+
+        var selectedOper = item[0].Oper;
+        var facility = self.facility;
+        var route = self.selectedRoute().route();
+
+        //load allowed tools / specIds
+        $.ajax({
+            url: self.utils.getAction("OctaneBuilder/GetAddOperToolAndSpecIds"),
+            cache: false,
+            dataType: "json",
+            type: "GET",
+            contentType: 'application/json',
+            data: { facility: facility, route: route, oper: selectedOper },
+            success: function (data) {
+                if (data.isSucceed) {
+
+                    self.addOperSpecIdList(ko.mapping.fromJS(data.specs)());
+                    self.addOperAllowedTools(ko.mapping.fromJS(data.allowedToolIds)());
+                    //self.addOperSelectedTools(ko.mapping.fromJS(data.allowedToolIds)());
+
+                    if (data.allowedToolIds.length > 0) {
+                        for (var i = 0; i < data.allowedToolIds.length; i++) {
+                            self.addOperSelectedTools.push(data.allowedToolIds[i]);
+                        }
+                    }
+
+                    self.addOperAllTools(ko.mapping.fromJS(data.allTools)());
+
+                } else {
+                    toastr["error"](data.message, 'Error');
+                }
+            },
+            error: function (response) {
+                alert("error: " + response);
+            }
+        });
+
+    });
+
+    //Whenever selection changes in ProcessType, filter out operation drop-down
+    self.addOperSelectedProcessType.subscribe(function (newValue) {
+        if (newValue === undefined || newValue === "" && newValue.length === 0) {
+            return false;
+        }
+
+        self.loadAddOperOperations();
+
+    });
+
+    self.addOperSelectAllowedTools.subscribe(function (newValue) {
+
+        if (newValue) {
+            for (var i = 0; i < self.addOperAllTools().length; i++) {
+                var toolId = self.addOperAllTools()[i].ToolId();
+
+                var isCurrentToolAllowed = false;
+                for (var j = 0; j < self.addOperAllowedTools().length; j++) {
+                    if (toolId === self.addOperAllowedTools()[j]) {
+                        isCurrentToolAllowed = true;
+                        break;
+                    }
+                }
+
+                if (!isCurrentToolAllowed) {
+                    self.addOperSelectedTools.remove(toolId);
+                } else {
+                    self.addOperSelectedTools.push(toolId);
+                }
+            }
+        } else {
+
+            for (var i = 0; i < self.addOperAllTools().length; i++) {
+                var toolId = self.addOperAllTools()[i].ToolId();
+
+                var isCurrentToolAllowed = false;
+                for (var j = 0; j < self.addOperAllowedTools().length; j++) {
+                    if (toolId === self.addOperAllowedTools()[j]) {
+                        isCurrentToolAllowed = true;
+                        break;
+                    }
+                }
+
+                if (isCurrentToolAllowed) {
+                    self.addOperSelectedTools.remove(toolId);
+                }
+            }
+        }
+    });
+
+    self.addOperSelectAllTools.subscribe(function (newValue) {
+        if (newValue) {
+            for (var i = 0; i < self.addOperAllTools().length; i++) {
+                var toolId = self.addOperAllTools()[i].ToolId();
+
+                var alreadyChecked = false;
+                for (var j = 0; j < self.addOperSelectedTools().length; j++) {
+                    if (toolId === self.addOperSelectedTools()[j]) {
+                        alreadyChecked = true;
+                        break;
+                    }
+                }
+
+                if (!alreadyChecked) {
+                    self.addOperSelectedTools.push(toolId);
+                }
+            }
+        } else {
+            for (var i = 0; i < self.addOperAllTools().length; i++) {
+                var toolId = self.addOperAllTools()[i].ToolId();
+                self.addOperSelectedTools.remove(toolId);
+            }
+        }
+    });
+
+    self.addOperSelectedSpecId.subscribe(function (newValue) {
+        if (newValue === undefined || newValue === "" || newValue.length === 0) {
+            return false;
+        }
+
+        self.addOperSpecIdTextValue(newValue);
+    });
+
+    self.AddNewOper = function () {
+
+        var validationErrs = [];
+
+        if (self.addOperSelectedOperation() === undefined || self.addOperSelectedOperation() === "" || self.addOperSelectedOperation().length == 0) {
+            validationErrs.push('Please select operation!');
+        }
+
+        if (self.addOperSpecIdTextValue() === undefined || self.addOperSpecIdTextValue() === "" || self.addOperSpecIdTextValue().length == 0) {
+            validationErrs.push('Please select/type SpecId!');
+        }
+
+        if (self.addOperSelectedTools() === undefined || self.addOperSelectedTools().length === 0) {
+            validationErrs.push('Please select at least one tool!');
+        }
+
+        if (validationErrs.length > 0) {
+            alert(self.getFormattedErrMessages(validationErrs));
+            return false;
+        }
+
+        var mvinHoldVal = "N";
+        var mvinSplitVal = "N";
+        var mvinMergeVal = "N";
+        var mvoutHoldVal = "N";
+        var mvoutSplitVal = "N";
+        var mvoutMergeVal = "N";
+
+        if (self.addOperMvinHold()) {
+            mvinHoldVal = "Y";
+        }
+
+        if (self.addOperMvinSplit()) {
+            mvinSplitVal = "Y";
+        }
+
+        if (self.addOperMvinMerge()) {
+            mvinMergeVal = "Y";
+        }
+
+        if (self.addOperMvoutHold()) {
+            mvoutHoldVal = "Y";
+        }
+
+        if (self.addOperMvoutSplit()) {
+            mvoutSplitVal = "Y";
+        }
+
+        if (self.addOperMvoutMerge()) {
+            mvoutMergeVal = "Y";
+        }
+
+
+        var addOperModel = JSON.stringify({
+            SwrId: self.swrId,
+            Facility: self.facility,
+            Route: self.selectedRoute().route(),
+            ProductType: self.addOperSelectedProductType(),
+            ProcessType: self.addOperSelectedProcessType(),
+            Operation: self.addOperSelectedOperation().Oper,
+            OperationShortDescription: self.addOperDescription(),
+            InsertAfterPoint: self.addOperSelectedInsertPoint(),
+            MvinHold: mvinHoldVal,
+            MvinSplit: mvinSplitVal,
+            MvinMerge: mvinMergeVal,
+            MvinInstructions: self.addOperMvinIns(),
+            MvoutHold: mvoutHoldVal,
+            MvoutSplit: mvoutSplitVal,
+            MvoutMerge: mvoutMergeVal,
+            MvoutInstructions: self.addOperMvoutIns(),
+            SpecId: self.addOperSpecIdTextValue(),
+            SelectedTools: self.addOperSelectedTools()
+        });
+
+        $.ajax({
+            url: self.utils.getAction("OctaneBuilder/AddOperation"),
+            cache: false,
+            dataType: "json",
+            type: "POST",
+            contentType: 'application/json',
+            data: addOperModel,
+            success: function (data) {
+                if (data.isSucceed) {
+
+                    toastr["info"]('saved successfully.', 'Info');
+                    window.location.reload();
+                } else {
+                    toastr["error"](data.message, 'Error');
+                }
+            },
+            error: function (response) {
+                alert("error: " + response);
+            }
+        });
+
+    }
+
+    // #endregion
+
+    // #region Customize/Skip route stuff
+
+    self.rdoCustomizeOrSkipRoute = ko.observable();
+
+    self.SkipSelectedRoute = function () {
+
+        var customFlagVal = self.selectedRoute().custom();
+
+        if (customFlagVal === "S") {
+            toastr["info"]('Route is already marked as skipped in the SWR.', 'Info');
+            return false;
+        }
+
+        //force user to save, if there were unsaved changes!
+        self.forceSave(function () {
+            self.CustomizeRoute(self.swrId, self.selectedRoute().route(), "S");
+        });
+
+        return true;
+    }
+
+    self.CustomizeOrSkipRouteOkBtn = function () {
+
+        if (self.rdoCustomizeOrSkipRoute() === undefined) {
+            toastr["info"]('Please make your selection', 'Info');
+            return false;
+        }
+
+        var customFlagSelectedValue = self.rdoCustomizeOrSkipRoute();
+        var currentCustomFlagValue = self.selectedRoute().custom();
+
+        if (currentCustomFlagValue === customFlagSelectedValue) {
+            var formattedValue = "";
+            if (customFlagSelectedValue === "S") {
+                formattedValue = "Skip";
+            } else if (customFlagSelectedValue === "N") {
+                formattedValue = "No";
+            }
+            else if (customFlagSelectedValue === "Y") {
+                formattedValue = "Yes";
+            }
+            toastr["info"]('The selected route is already marked as: ' + formattedValue, 'Info');
+            return false;
+        }
+
+        self.CustomizeRoute(self.swrId, self.selectedRoute().route(), customFlagSelectedValue);
+
+        return true;
+    }
+
+    self.CustomizeRoute = function (swrId, route, customFlagValue) {
+
+        $.ajax({
+            url: self.utils.getAction("OctaneBuilder/CustomizeRoute"),
+            cache: false,
+            dataType: "json",
+            type: "POST",
+            contentType: 'application/json',
+            data: JSON.stringify({ facility: self.facility, swrId: swrId, route: route, customFlagValue: customFlagValue }),
+            success: function (data) {
+                if (data.isSucceed) {
+
+                    toastr["info"]('Saved successfully.', 'Info');
+
+                    self.selectedRoute().custom(customFlagValue);
+
+                    if (customFlagValue === "S" || customFlagValue === "N") {
+                        self.selectedRoute().ver(undefined);
+                    }
+
+                    if (customFlagValue === "Y") {
+                        self.selectedRoute().ver(data.routeVersion);
+                    }
+
+                    self.originalModel.routes(toKnockoutRoutes(fromKnockoutRoutes(self.model.routes)));
+
+                    self.detectChanges();
+
+                    $('#customize-or-skip-route-dialog').modal('hide');
+
+                } else {
+                    toastr["error"](data.message, 'Error');
+                }
+            },
+            error: function (response) {
+                alert("error: " + response);
+            }
+        });
+    }
+
+    // #endregion
+
+    // #region Revert to Std route stuff
+    self.RevertSelectedRouteToStd = function () {
+
+        //force user to save, if there were unsaved changes!
+        self.forceSave(function () {
+            $.ajax({
+                url: self.utils.getAction("OctaneBuilder/RevertRouteToStd"),
+                cache: false,
+                dataType: "json",
+                type: "POST",
+                contentType: 'application/json',
+                data: JSON.stringify({ swrId: self.swrId, route: self.selectedRoute().route() }),
+                success: function (data) {
+                    if (data.isSucceed) {
+                        toastr["info"]('Route reverted to Std successfully.', 'Info');
+                    } else {
+                        toastr["error"](data.message, 'Error');
+
+                    }
+
+                    //reload the same page...
+                    window.location.reload();
+                },
+                error: function (response) {
+                    alert("error: " + response);
+                }
+            });
+        });
+    }
+    // #endregion
+
+    self.initialize = function () {
+
+        toastr.options = {
+            "closeButton": false,
+            "debug": false,
+            "newestOnTop": false,
+            "progressBar": false,
+            "positionClass": "toast-top-center",
+            "preventDuplicates": false,
+            "onclick": null,
+            "showDuration": "300",
+            "hideDuration": "1000",
+            "timeOut": "5000",
+            "extendedTimeOut": "1000",
+            "showEasing": "swing",
+            "hideEasing": "linear",
+            "showMethod": "fadeIn",
+            "hideMethod": "fadeOut"
+        };
+
+        var routes = [];
+        for (var i = 0; i < args.routes.length; i++) {
+            var route = args.routes[i];
+            routes.push(new BuilderRoute(self.swrId, route.Route, route.DisplaySequence, route.SwrRouteVersion, route.ProductionRouteVersion, route.Custom, route.Opers));
+        }
+
+        ////Populate routes for add new route dialog (insert after - dropDown)
+        //self.routesList(routes.map(function(x) {
+        //    return x.route();
+        //}));
+
+        self.model.routes(routes);
+        self.originalModel.routes(toKnockoutRoutes(fromKnockoutRoutes(self.model.routes)));
+
+        self.memento = new Memento({ model: fromKnockoutRoutes(self.model.routes) });
+
+        ko.applyBindings(self);
+
+        self.isInitialized(true);
+    }
+}
